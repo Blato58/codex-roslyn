@@ -1,0 +1,14 @@
+[mcp_servers.roslyn]
+url = "http://127.0.0.1:38777/mcp"
+startup_timeout_sec = 1
+tool_timeout_sec = 20
+enabled_tools = [
+  "cs_repo_overview",
+  "cs_symbol_search",
+  "cs_symbol_at",
+  "cs_find_references",
+  "cs_diagnostics",
+  "cs_change_impact",
+  "cs_test_impact",
+  "cs_refactor_preview"
+]

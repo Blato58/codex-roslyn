@@ -1,0 +1,20 @@
+[plugins."dotnet-semantic-tools".mcp_servers.roslyn]
+enabled = true
+default_tools_approval_mode = "approve"
+enabled_tools = [
+  "cs_repo_overview",
+  "cs_solution_list",
+  "cs_solution_select",
+  "cs_index_status",
+  "cs_symbol_search",
+  "cs_document_outline",
+  "cs_symbol_at",
+  "cs_find_references",
+  "cs_find_implementations",
+  "cs_type_hierarchy",
+  "cs_callers",
+  "cs_diagnostics",
+  "cs_change_impact",
+  "cs_test_impact",
+  "cs_refactor_preview"
+]

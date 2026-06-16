@@ -1,0 +1,18 @@
+---
+name: csharp-safe-refactor
+description: Use for safe C#/.NET rename, move type, extract interface, change signature planning, and refactor impact review. Always call Roslyn refactor preview before editing files.
+---
+
+# C# safe refactoring
+
+For semantic refactor planning:
+
+- Identify the target symbol with `cs_symbol_search` or `cs_symbol_at`.
+- Use `cs_find_references` to estimate blast radius.
+- Use `cs_find_implementations`, `cs_type_hierarchy`, and `cs_callers` when inheritance or call flow matters.
+- Use `cs_diagnostics` before editing to capture the current compiler state.
+- Call `cs_change_impact` or `cs_test_impact` when planning validation.
+- Call `cs_refactor_preview` before editing files.
+- Keep results compact first and request source only for files that need edits.
+- Review changed files, compact diff preview, risk reasons, and diagnostics before making edits.
+- Do not apply workspace edits through MCP; apply tools are not enabled by default.

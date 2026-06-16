@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Codex.Roslyn.Abstractions/Codex.Roslyn.Abstractions.csproj" />
+    <Project Path="src/Codex.Roslyn.Cli/Codex.Roslyn.Cli.csproj" />
+    <Project Path="src/Codex.Roslyn.Core/Codex.Roslyn.Core.csproj" />
+    <Project Path="src/Codex.Roslyn.Index/Codex.Roslyn.Index.csproj" />
+    <Project Path="src/Codex.Roslyn.Mcp/Codex.Roslyn.Mcp.csproj" />
+    <Project Path="src/Codex.Roslyn.Workspaces/Codex.Roslyn.Workspaces.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Codex.Roslyn.Tests/Codex.Roslyn.Tests.csproj" />
+  </Folder>
+</Solution>

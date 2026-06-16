@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>dotnet-roslyn-mcp</AssemblyName>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>dotnet-roslyn-mcp</ToolCommandName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Codex.Roslyn.Abstractions\Codex.Roslyn.Abstractions.csproj" />
+    <ProjectReference Include="..\Codex.Roslyn.Core\Codex.Roslyn.Core.csproj" />
+    <ProjectReference Include="..\Codex.Roslyn.Mcp\Codex.Roslyn.Mcp.csproj" />
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dotnet-roslyn-mcp session-context",
+            "timeout": 3,
+            "statusMessage": "Loading C# semantic tooling context"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dotnet-roslyn-mcp guard-bash",
+            "timeout": 2,
+            "statusMessage": "Checking whether Roslyn semantic tools should be used"
+          }
+        ]
+      }
+    ]
+  }
+}

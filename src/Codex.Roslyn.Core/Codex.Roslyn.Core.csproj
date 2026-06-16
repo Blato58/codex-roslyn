@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Codex.Roslyn.Abstractions\Codex.Roslyn.Abstractions.csproj" />
+    <ProjectReference Include="..\Codex.Roslyn.Index\Codex.Roslyn.Index.csproj" />
+    <ProjectReference Include="..\Codex.Roslyn.Workspaces\Codex.Roslyn.Workspaces.csproj" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+</Project>
