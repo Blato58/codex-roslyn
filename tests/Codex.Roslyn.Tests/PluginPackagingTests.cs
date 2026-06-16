@@ -32,12 +32,36 @@ public sealed class PluginPackagingTests
             .GetProperty("command")
             .GetString();
 
-        Assert.Equal("dotnet-roslyn-mcp session-context", sessionStartCommand);
+        Assert.Contains("scripts/roslyn-mcp.ps1", sessionStartCommand);
+        Assert.Contains("session-context", sessionStartCommand);
         Assert.Equal("Bash", hooks.GetProperty("PreToolUse")[0].GetProperty("matcher").GetString());
-        Assert.Equal("dotnet-roslyn-mcp guard-bash", preToolUseCommand);
+        Assert.Contains("scripts/roslyn-mcp.ps1", preToolUseCommand);
+        Assert.Contains("guard-bash", preToolUseCommand);
+    }
+
+    [Fact]
+    public void McpConfig_UsesSelfInstallingLauncher()
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(RepoPath("plugin", ".mcp.json")));
+        var roslynServer = document.RootElement
+            .GetProperty("mcp_servers")
+            .GetProperty("roslyn");
+        var args = roslynServer
+            .GetProperty("args")
+            .EnumerateArray()
+            .Select(arg => arg.GetString())
+            .ToArray();
+
+        Assert.Equal("powershell", roslynServer.GetProperty("command").GetString());
+        Assert.Contains("./scripts/roslyn-mcp.ps1", args);
+        Assert.Contains("serve", args);
+        Assert.Contains("--stdio", args);
+        Assert.Equal(".", roslynServer.GetProperty("cwd").GetString());
+        Assert.True(roslynServer.GetProperty("startup_timeout_sec").GetInt32() >= 60);
     }
 
     [Theory]
+    [InlineData("plugin", "scripts", "roslyn-mcp.ps1")]
     [InlineData("plugin", "skills", "csharp-semantic-navigation", "SKILL.md")]
     [InlineData("plugin", "skills", "csharp-safe-refactor", "SKILL.md")]
     [InlineData("plugin", "skills", "dotnet-test-impact", "SKILL.md")]

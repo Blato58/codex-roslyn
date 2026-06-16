@@ -110,11 +110,13 @@ Tool methods live in `src/Codex.Roslyn.Mcp/Tools/RepoTools.cs`. Business logic b
 
 For the full setup flow, including installing the required `dotnet-roslyn-mcp` .NET tool, see [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
-The plugin manifest is `plugin/.codex-plugin/plugin.json`. The bundled MCP config in `plugin/.mcp.json` expects an installed `dotnet-roslyn-mcp` command and starts:
+The plugin manifest is `plugin/.codex-plugin/plugin.json`. The bundled MCP config in `plugin/.mcp.json` starts MCP through the plugin launcher:
 
 ```text
-dotnet-roslyn-mcp serve --stdio
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./scripts/roslyn-mcp.ps1 serve --stdio
 ```
+
+On Windows, the launcher installs the global `dotnet-roslyn-mcp` .NET tool if it is missing before it starts MCP.
 
 The plugin also includes:
 
@@ -122,6 +124,7 @@ The plugin also includes:
 - `plugin/skills/csharp-safe-refactor/SKILL.md`
 - `plugin/skills/dotnet-test-impact/SKILL.md`
 - `plugin/hooks/hooks.json`
+- `plugin/scripts/roslyn-mcp.ps1`
 
 For direct Codex config examples, see `plugin/config/roslyn.config.toml` for stdio/plugin policy and `plugin/config/roslyn.daemon.config.toml` for loopback HTTP daemon usage.
 

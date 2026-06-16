@@ -5,7 +5,7 @@ CodexRoslyn has two installable pieces:
 1. The `dotnet-roslyn-mcp` .NET tool, which runs the local MCP server.
 2. The Codex plugin bundle under `plugin/`, which provides skills, hooks, and MCP startup configuration.
 
-Installing the plugin does not install the .NET tool. The plugin expects the `dotnet-roslyn-mcp` command to already exist on PATH.
+The plugin starts MCP through `plugin/scripts/roslyn-mcp.ps1`. On Windows, that launcher installs the global `dotnet-roslyn-mcp` .NET tool automatically if it cannot find it, then starts `dotnet-roslyn-mcp serve --stdio`. Installing the tool manually is still useful for development and troubleshooting.
 
 ## Prerequisites
 
@@ -74,7 +74,7 @@ plugin/.mcp.json
 That config starts the MCP server with:
 
 ```text
-dotnet-roslyn-mcp serve --stdio
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./scripts/roslyn-mcp.ps1 serve --stdio
 ```
 
 Install or enable the plugin from the Codex plugin directory or your local marketplace entry that points at this repository's `plugin/` folder. After installing or updating the plugin:
@@ -116,7 +116,13 @@ dotnet-roslyn-mcp status --repo .
 
 The plugin likely installed correctly, but Codex could not start the MCP server. Check:
 
-- `dotnet-roslyn-mcp` is installed:
+- PowerShell can run the launcher:
+
+  ```powershell
+  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\plugin\scripts\roslyn-mcp.ps1 session-context
+  ```
+
+- `dotnet-roslyn-mcp` is installed or can be installed by the launcher:
 
   ```powershell
   dotnet tool list -g
@@ -135,6 +141,8 @@ Codex may have been started before PATH was updated. Restart Codex. If it still 
 ```text
 C:\Users\<you>\.dotnet\tools\dotnet-roslyn-mcp.exe
 ```
+
+The plugin launcher also probes `%USERPROFILE%\.dotnet\tools`, so it can usually find the tool even when Codex was started before PATH changed.
 
 ### Local package install fails
 
