@@ -188,6 +188,117 @@ public sealed class SemanticWorkspaceIntegrationTests
     }
 
     [Fact]
+    public async Task RefactorPreview_ChangeNamespaceUpdatesContainingNamespaceAndReferences()
+    {
+        var repo = CreateSemanticRepo();
+        File.WriteAllText(
+            Path.Combine(repo, "src", "SampleLib", "MultiNamespace.cs"),
+            """
+            namespace Alpha
+            {
+                public class Unrelated
+                {
+                }
+            }
+
+            namespace Demo
+            {
+                public class MultiTarget
+                {
+                }
+            }
+            """);
+        File.WriteAllText(
+            Path.Combine(repo, "src", "SampleLib", "Consumer.cs"),
+            """
+            using Demo;
+
+            namespace Consumers;
+
+            public class Consumer
+            {
+                private MultiTarget target = new();
+
+                public Demo.MultiTarget Create() => target;
+            }
+            """);
+        using var services = CreateServices(out _);
+        services.GetRequiredService<ColdIndexService>().Build(repo);
+        var solutionId = services.GetRequiredService<SolutionDiscoveryService>().Discover(repo).Single().SolutionId;
+        services.GetRequiredService<SolutionSelectionService>().Select(solutionId, new ToolScope { RepoRoot = repo });
+        var semantic = services.GetRequiredService<SemanticQueryService>();
+        var refactors = services.GetRequiredService<RefactorPreviewService>();
+        var targetPath = Path.Combine(repo, "src", "SampleLib", "MultiNamespace.cs");
+        var targetPosition = FindPosition(targetPath, "MultiTarget");
+        var targetSymbol = await semantic.SymbolAtAsync("src/SampleLib/MultiNamespace.cs", targetPosition.Line, targetPosition.Column, new ToolScope { RepoRoot = repo });
+
+        var preview = await refactors.PreviewAsync("change_namespace", targetSymbol.Items.Single().SymbolId, "Demo.Renamed", scope: new ToolScope { RepoRoot = repo });
+        var applied = await refactors.ApplyWorkspaceEditAsync(preview.Items.Single().EditId, new ToolScope { RepoRoot = repo });
+        var targetText = File.ReadAllText(targetPath);
+        var consumerText = File.ReadAllText(Path.Combine(repo, "src", "SampleLib", "Consumer.cs"));
+
+        Assert.Equal("ok", preview.ResultKind);
+        Assert.Equal("ok", applied.ResultKind);
+        Assert.Contains("namespace Alpha", targetText);
+        Assert.Contains("namespace Demo.Renamed", targetText);
+        Assert.Contains("using Demo.Renamed;", consumerText);
+        Assert.Contains("Demo.Renamed.MultiTarget", consumerText);
+    }
+
+    [Fact]
+    public async Task RefactorPreview_RejectsExistingDestinationFiles()
+    {
+        var repo = CreateSemanticRepo();
+        var destinationPath = Path.Combine(repo, "src", "SampleLib", "Existing.cs");
+        File.WriteAllText(destinationPath, "namespace Demo;\n");
+        using var services = CreateServices(out _);
+        services.GetRequiredService<ColdIndexService>().Build(repo);
+        var solutionId = services.GetRequiredService<SolutionDiscoveryService>().Discover(repo).Single().SolutionId;
+        services.GetRequiredService<SolutionSelectionService>().Select(solutionId, new ToolScope { RepoRoot = repo });
+        var semantic = services.GetRequiredService<SemanticQueryService>();
+        var refactors = services.GetRequiredService<RefactorPreviewService>();
+        var sourcePath = Path.Combine(repo, "src", "SampleLib", "CustomerService.cs");
+        var classPosition = FindPosition(sourcePath, "CustomerService");
+        var classSymbol = await semantic.SymbolAtAsync("src/SampleLib/CustomerService.cs", classPosition.Line, classPosition.Column, new ToolScope { RepoRoot = repo });
+
+        var movePreview = await refactors.PreviewAsync("move_type_to_file", classSymbol.Items.Single().SymbolId, file: "src/SampleLib/Existing.cs", scope: new ToolScope { RepoRoot = repo });
+        var interfacePreview = await refactors.PreviewAsync("extract_interface", classSymbol.Items.Single().SymbolId, "ICustomerService", "src/SampleLib/Existing.cs", new ToolScope { RepoRoot = repo });
+
+        Assert.Equal("invalid_request", movePreview.ResultKind);
+        Assert.Equal("invalid_request", interfacePreview.ResultKind);
+    }
+
+    [Fact]
+    public async Task AdvancedTools_DeadCodeCandidatesIncludesPrivateFields()
+    {
+        var repo = CreateSemanticRepo();
+        File.WriteAllText(
+            Path.Combine(repo, "src", "SampleLib", "FieldHolder.cs"),
+            """
+            namespace Demo;
+
+            public class FieldHolder
+            {
+                private int unusedField;
+                private int usedField;
+
+                public int ReadUsed() => usedField;
+            }
+            """);
+        using var services = CreateServices(out _);
+        services.GetRequiredService<ColdIndexService>().Build(repo);
+        var solutionId = services.GetRequiredService<SolutionDiscoveryService>().Discover(repo).Single().SolutionId;
+        services.GetRequiredService<SolutionSelectionService>().Select(solutionId, new ToolScope { RepoRoot = repo });
+        var advanced = services.GetRequiredService<AdvancedSemanticService>();
+
+        var candidates = await advanced.DeadCodeCandidatesAsync(new ToolScope { RepoRoot = repo });
+
+        Assert.Equal("ok", candidates.ResultKind);
+        Assert.Contains(candidates.Items, item => item.DisplayName.Contains("unusedField", StringComparison.Ordinal));
+        Assert.DoesNotContain(candidates.Items, item => item.DisplayName.EndsWith(".usedField", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task AdvancedTools_ReturnCompactContextAndDiagnosticsSummary()
     {
         var repo = CreateSemanticRepo();

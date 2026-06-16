@@ -326,33 +326,35 @@ public sealed class AdvancedSemanticService(
                     break;
                 }
 
-                var symbol = model.GetDeclaredSymbol(declaration, cancellationToken);
-                if (symbol is null || symbol.DeclaredAccessibility != Accessibility.Private)
+                foreach (var symbol in GetPrivateMemberSymbols(model, declaration, cancellationToken))
                 {
-                    continue;
-                }
+                    if (candidates.Count >= maxItems)
+                    {
+                        break;
+                    }
 
-                var references = await SymbolFinder.FindReferencesAsync(symbol, loaded.Handle.Solution, cancellationToken);
-                if (references.SelectMany(reference => reference.Locations).Any())
-                {
-                    continue;
-                }
+                    var references = await SymbolFinder.FindReferencesAsync(symbol, loaded.Handle.Solution, cancellationToken);
+                    if (references.SelectMany(reference => reference.Locations).Any())
+                    {
+                        continue;
+                    }
 
-                var location = symbol.Locations.FirstOrDefault(location => location.IsInSource)?.GetLineSpan();
-                if (location is null)
-                {
-                    continue;
-                }
+                    var location = symbol.Locations.FirstOrDefault(location => location.IsInSource)?.GetLineSpan();
+                    if (location is null)
+                    {
+                        continue;
+                    }
 
-                candidates.Add(new DeadCodeCandidateResult
-                {
-                    SymbolId = symbolIdService.CreateSymbolId(loaded.RepoRoot, loaded.Solution!.SolutionId, symbol),
-                    DisplayName = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-                    File = RelativePath(loaded.RepoRoot, location.Value.Path),
-                    Line = location.Value.StartLinePosition.Line + 1,
-                    Confidence = "low",
-                    Reasons = ["Private symbol has no semantic references in the selected solution."]
-                });
+                    candidates.Add(new DeadCodeCandidateResult
+                    {
+                        SymbolId = symbolIdService.CreateSymbolId(loaded.RepoRoot, loaded.Solution!.SolutionId, symbol),
+                        DisplayName = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+                        File = RelativePath(loaded.RepoRoot, location.Value.Path),
+                        Line = location.Value.StartLinePosition.Line + 1,
+                        Confidence = "low",
+                        Reasons = ["Private symbol has no semantic references in the selected solution."]
+                    });
+                }
             }
         }
 
@@ -597,6 +599,29 @@ public sealed class AdvancedSemanticService(
             {
                 yield return symbol;
             }
+        }
+    }
+
+    private static IEnumerable<ISymbol> GetPrivateMemberSymbols(SemanticModel model, SyntaxNode declaration, CancellationToken cancellationToken)
+    {
+        if (declaration is FieldDeclarationSyntax fieldDeclaration)
+        {
+            foreach (var variable in fieldDeclaration.Declaration.Variables)
+            {
+                var fieldSymbol = model.GetDeclaredSymbol(variable, cancellationToken);
+                if (fieldSymbol?.DeclaredAccessibility == Accessibility.Private)
+                {
+                    yield return fieldSymbol;
+                }
+            }
+
+            yield break;
+        }
+
+        var symbol = model.GetDeclaredSymbol(declaration, cancellationToken);
+        if (symbol?.DeclaredAccessibility == Accessibility.Private)
+        {
+            yield return symbol;
         }
     }
 

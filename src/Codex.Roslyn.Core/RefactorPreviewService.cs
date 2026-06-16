@@ -474,7 +474,7 @@ public sealed class RefactorPreviewService(
             return Empty<RefactorPreviewResult>(loaded.ResponseKind, loaded.Summary, detailLevel, loaded.Warning);
         }
 
-        var changes = await BuildChangeNamespaceChangesAsync(loaded.Handle!.Solution, loaded.RepoRoot, namedType, newName, cancellationToken);
+        var changes = await BuildChangeNamespaceChangesAsync(loaded.Handle!.Solution, loaded.RepoRoot, namedType, newName.Trim(), cancellationToken);
         if (changes.ResponseKind is not null)
         {
             return Empty<RefactorPreviewResult>(changes.ResponseKind, changes.Summary, detailLevel);
@@ -692,33 +692,19 @@ public sealed class RefactorPreviewService(
 
         var destinationPath = Path.Combine(repoRoot, destinationFile.Replace('/', Path.DirectorySeparatorChar));
         var destinationText = BuildMovedTypeText(syntax, namedType, declarationReference.SyntaxTree);
-        var destinationDocument = FindDocument(solution, repoRoot, destinationFile);
-        DocumentPreviewChanges destinationChange;
-        if (destinationDocument?.FilePath is not null)
+        if (FindDocument(solution, repoRoot, destinationFile) is not null)
         {
-            var oldText = await destinationDocument.GetTextAsync(cancellationToken);
-            var insertText = oldText.Length == 0 || oldText.ToString().EndsWith(Environment.NewLine, StringComparison.Ordinal)
-                ? destinationText
-                : Environment.NewLine + destinationText;
-            destinationChange = new DocumentPreviewChanges(
-                destinationFile,
-                destinationDocument.Id,
-                oldText,
-                [new TextChange(new TextSpan(oldText.Length, 0), insertText)],
-                null,
-                destinationDocument.FilePath);
+            return MoveTypeChangesResult.Fail("invalid_request", "Destination file already exists.");
         }
-        else
-        {
-            var documentId = DocumentId.CreateNewId(sourceDocument.Project.Id);
-            destinationChange = new DocumentPreviewChanges(
-                destinationFile,
-                documentId,
-                SourceText.From(string.Empty, Encoding.UTF8),
-                [new TextChange(new TextSpan(0, 0), destinationText)],
-                sourceDocument.Project.Id,
-                destinationPath);
-        }
+
+        var documentId = DocumentId.CreateNewId(sourceDocument.Project.Id);
+        var destinationChange = new DocumentPreviewChanges(
+            destinationFile,
+            documentId,
+            SourceText.From(string.Empty, Encoding.UTF8),
+            [new TextChange(new TextSpan(0, 0), destinationText)],
+            sourceDocument.Project.Id,
+            destinationPath);
 
         return MoveTypeChangesResult.Ok([sourceChange, destinationChange]);
     }
@@ -742,39 +728,68 @@ public sealed class RefactorPreviewService(
             return MoveTypeChangesResult.Fail("invalid_request", "Namespace preview could not resolve the source document.");
         }
 
-        var root = await declarationReference.SyntaxTree.GetRootAsync(cancellationToken);
-        SyntaxNode? namespaceNode = root.DescendantNodes()
-            .OfType<FileScopedNamespaceDeclarationSyntax>()
-            .FirstOrDefault();
-        namespaceNode ??= root.DescendantNodes()
-            .OfType<NamespaceDeclarationSyntax>()
+        var syntax = await declarationReference.GetSyntaxAsync(cancellationToken);
+        var namespaceNode = syntax.AncestorsAndSelf()
+            .OfType<BaseNamespaceDeclarationSyntax>()
             .FirstOrDefault();
         if (namespaceNode is null)
         {
             return MoveTypeChangesResult.Fail("invalid_request", "Namespace preview requires a file-scoped or block-scoped namespace.");
         }
 
-        var oldText = await sourceDocument.GetTextAsync(cancellationToken);
-        TextSpan span = namespaceNode switch
+        var oldNamespace = namedType.ContainingNamespace?.IsGlobalNamespace == false
+            ? namedType.ContainingNamespace.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)
+            : string.Empty;
+        if (string.IsNullOrWhiteSpace(oldNamespace))
         {
-            FileScopedNamespaceDeclarationSyntax fileScoped => fileScoped.Name.Span,
-            NamespaceDeclarationSyntax blockScoped => blockScoped.Name.Span,
-            _ => default
-        };
-        if (span == default)
-        {
-            return MoveTypeChangesResult.Fail("invalid_request", "Namespace preview could not locate the namespace name span.");
+            return MoveTypeChangesResult.Fail("invalid_request", "Namespace preview requires a non-global containing namespace.");
         }
 
-        var change = new DocumentPreviewChanges(
-            RelativePath(repoRoot, sourceDocument.FilePath),
-            sourceDocument.Id,
-            oldText,
-            [new TextChange(span, newNamespace)],
-            null,
-            sourceDocument.FilePath);
+        if (!string.Equals(namespaceNode.Name.ToString(), oldNamespace, StringComparison.Ordinal))
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Namespace preview requires a namespace declaration that names the full containing namespace.");
+        }
 
-        return MoveTypeChangesResult.Ok([change]);
+        var changes = new List<DocumentPreviewChanges>();
+        foreach (var document in solution.Projects.SelectMany(project => project.Documents))
+        {
+            if (document.FilePath is null)
+            {
+                continue;
+            }
+
+            var root = await document.GetSyntaxRootAsync(cancellationToken);
+            if (root is null)
+            {
+                continue;
+            }
+
+            var textChanges = new List<TextChange>();
+            if (document.Id == sourceDocument.Id)
+            {
+                textChanges.Add(new TextChange(namespaceNode.Name.Span, newNamespace));
+            }
+
+            textChanges.AddRange(BuildNamespaceReferenceChanges(root, oldNamespace, newNamespace, namedType.Name));
+            var distinctChanges = textChanges
+                .DistinctBy(change => change.Span)
+                .OrderByDescending(change => change.Span.Start)
+                .ToArray();
+            if (distinctChanges.Length == 0)
+            {
+                continue;
+            }
+
+            changes.Add(new DocumentPreviewChanges(
+                RelativePath(repoRoot, document.FilePath),
+                document.Id,
+                await document.GetTextAsync(cancellationToken),
+                distinctChanges,
+                null,
+                document.FilePath));
+        }
+
+        return MoveTypeChangesResult.Ok(changes);
     }
 
     private static async Task<MoveTypeChangesResult> BuildExtractInterfaceChangesAsync(
@@ -844,32 +859,18 @@ public sealed class RefactorPreviewService(
         builder.AppendLine("}");
 
         var destinationPath = Path.Combine(repoRoot, destinationFile.Replace('/', Path.DirectorySeparatorChar));
-        var destinationDocument = FindDocument(solution, repoRoot, destinationFile);
-        DocumentPreviewChanges destinationChange;
-        if (destinationDocument?.FilePath is not null)
+        if (FindDocument(solution, repoRoot, destinationFile) is not null)
         {
-            var destinationOldText = await destinationDocument.GetTextAsync(cancellationToken);
-            var insertText = destinationOldText.Length == 0 || destinationOldText.ToString().EndsWith(Environment.NewLine, StringComparison.Ordinal)
-                ? builder.ToString()
-                : Environment.NewLine + builder;
-            destinationChange = new DocumentPreviewChanges(
-                destinationFile,
-                destinationDocument.Id,
-                destinationOldText,
-                [new TextChange(new TextSpan(destinationOldText.Length, 0), insertText)],
-                null,
-                destinationDocument.FilePath);
+            return MoveTypeChangesResult.Fail("invalid_request", "Destination file already exists.");
         }
-        else
-        {
-            destinationChange = new DocumentPreviewChanges(
-                destinationFile,
-                DocumentId.CreateNewId(sourceDocument.Project.Id),
-                SourceText.From(string.Empty, Encoding.UTF8),
-                [new TextChange(new TextSpan(0, 0), builder.ToString())],
-                sourceDocument.Project.Id,
-                destinationPath);
-        }
+
+        var destinationChange = new DocumentPreviewChanges(
+            destinationFile,
+            DocumentId.CreateNewId(sourceDocument.Project.Id),
+            SourceText.From(string.Empty, Encoding.UTF8),
+            [new TextChange(new TextSpan(0, 0), builder.ToString())],
+            sourceDocument.Project.Id,
+            destinationPath);
 
         var sourceText = await sourceDocument.GetTextAsync(cancellationToken);
         var updatedClass = classDeclaration.AddBaseListTypes(
@@ -883,6 +884,39 @@ public sealed class RefactorPreviewService(
             sourceDocument.FilePath);
 
         return MoveTypeChangesResult.Ok([sourceChange, destinationChange]);
+    }
+
+    private static IEnumerable<TextChange> BuildNamespaceReferenceChanges(
+        SyntaxNode root,
+        string oldNamespace,
+        string newNamespace,
+        string typeName)
+    {
+        foreach (var usingDirective in root.DescendantNodes().OfType<UsingDirectiveSyntax>())
+        {
+            if (usingDirective.StaticKeyword.RawKind != 0 || usingDirective.Alias is not null || usingDirective.Name is null)
+            {
+                continue;
+            }
+
+            if (string.Equals(usingDirective.Name.ToString(), oldNamespace, StringComparison.Ordinal))
+            {
+                yield return new TextChange(usingDirective.Name.Span, newNamespace);
+            }
+        }
+
+        foreach (var qualifiedName in root.DescendantNodes().OfType<QualifiedNameSyntax>())
+        {
+            if (qualifiedName.Right.Identifier.ValueText != typeName)
+            {
+                continue;
+            }
+
+            if (string.Equals(qualifiedName.Left.ToString(), oldNamespace, StringComparison.Ordinal))
+            {
+                yield return new TextChange(qualifiedName.Left.Span, newNamespace);
+            }
+        }
     }
 
     private static RefactorPreviewResult CreatePreviewResult(
