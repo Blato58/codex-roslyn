@@ -44,7 +44,6 @@ public sealed class PluginPackagingTests
     {
         using var document = JsonDocument.Parse(File.ReadAllText(RepoPath("plugin", ".mcp.json")));
         var roslynServer = document.RootElement
-            .GetProperty("mcp_servers")
             .GetProperty("roslyn");
         var args = roslynServer
             .GetProperty("args")

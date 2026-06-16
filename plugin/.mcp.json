@@ -1,19 +1,17 @@
 {
-  "mcp_servers": {
-    "roslyn": {
-      "command": "powershell",
-      "args": [
-        "-NoLogo",
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        "./scripts/roslyn-mcp.ps1",
-        "serve",
-        "--stdio"
-      ],
-      "cwd": ".",
-      "startup_timeout_sec": 120
-    }
+  "roslyn": {
+    "command": "powershell",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "./scripts/roslyn-mcp.ps1",
+      "serve",
+      "--stdio"
+    ],
+    "cwd": ".",
+    "startup_timeout_sec": 120
   }
 }

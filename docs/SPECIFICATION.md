@@ -1212,11 +1212,9 @@ Codex plugins require `.codex-plugin/plugin.json` and can point to `skills`, `ho
 
 ```json
 {
-  "mcp_servers": {
-    "roslyn": {
-      "command": "dotnet-roslyn-mcp",
-      "args": ["serve", "--stdio"]
-    }
+  "roslyn": {
+    "command": "dotnet-roslyn-mcp",
+    "args": ["serve", "--stdio"]
   }
 }
 ```
