@@ -15,7 +15,8 @@ public sealed class AdvancedSemanticService(
     WorkspaceManager workspaceManager,
     ColdIndexService coldIndexService,
     SemanticSymbolCache symbolCache,
-    SemanticSymbolIdService symbolIdService)
+    SemanticSymbolIdService symbolIdService,
+    ImpactAnalysisService impactAnalysisService)
 {
     public async Task<ToolResponse<ContextPackResult>> ContextPackAsync(
         IReadOnlyList<string>? symbolIds = null,
@@ -43,6 +44,21 @@ public sealed class AdvancedSemanticService(
             }
 
             primarySymbols.Add(symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat));
+            var sourceLocation = symbol.Locations.FirstOrDefault(location => location.IsInSource);
+            var sourcePath = sourceLocation?.SourceTree?.FilePath ?? sourceLocation?.GetLineSpan().Path;
+            if (!string.IsNullOrWhiteSpace(sourcePath))
+            {
+                selectedFiles.Add(RelativePath(loaded.RepoRoot, sourcePath));
+            }
+
+            foreach (var syntaxReference in symbol.DeclaringSyntaxReferences)
+            {
+                if (!string.IsNullOrWhiteSpace(syntaxReference.SyntaxTree.FilePath))
+                {
+                    selectedFiles.Add(RelativePath(loaded.RepoRoot, syntaxReference.SyntaxTree.FilePath));
+                }
+            }
+
             var references = await SymbolFinder.FindReferencesAsync(symbol, loaded.Handle!.Solution, cancellationToken);
             var filesForSymbol = ReferenceFiles(loaded.Handle.Solution, loaded.RepoRoot, references)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -61,17 +77,39 @@ public sealed class AdvancedSemanticService(
             selectedFiles.Add(NormalizePath(file));
         }
 
-        var diagnostics = await DiagnosticsCoreAsync(loaded.Handle!.Solution, loaded.RepoRoot, null, "warning", Math.Clamp(maxItems, 1, 100), cancellationToken);
-        var diagnosticsSummary = diagnostics
-            .GroupBy(diagnostic => diagnostic.Severity, StringComparer.OrdinalIgnoreCase)
-            .Select(group => $"{group.Key}: {group.Count()}")
-            .ToArray();
         var testSummary = selectedFiles
             .Where(file => file.Contains("test", StringComparison.OrdinalIgnoreCase))
             .Take(10)
             .ToArray();
         var filePage = selectedFiles.Take(Math.Clamp(maxItems, 1, 100)).ToArray();
-        var estimatedTokens = Math.Min(maxTokens, 200 + (primarySymbols.Count * 40) + (filePage.Length * 20) + (diagnosticsSummary.Length * 20));
+        var testImpact = await impactAnalysisService.TestImpactAsync(
+            changedFiles: filePage,
+            scope: scope,
+            detailLevel: detailLevel,
+            maxItems: 50,
+            cancellationToken: cancellationToken);
+        var validationCommands = testImpact.ResultKind == "ok"
+            ? testImpact.Items
+                .Select(item => item.Command)
+                .Where(command => !string.IsNullOrWhiteSpace(command))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(5)
+                .Cast<string>()
+                .ToArray()
+            : [];
+        var diagnostics = await DiagnosticsCoreAsync(loaded.Handle!.Solution, loaded.RepoRoot, null, "warning", Math.Clamp(maxItems, 1, 100), cancellationToken);
+        var diagnosticsSummary = diagnostics
+            .GroupBy(diagnostic => diagnostic.Severity, StringComparer.OrdinalIgnoreCase)
+            .Select(group => $"{group.Key}: {group.Count()}")
+            .ToArray();
+        var recommendedNextTools = RecommendedNextTools(symbolIds, files, validationCommands);
+        var estimatedTokens = Math.Min(
+            maxTokens,
+            200
+            + (primarySymbols.Count * 40)
+            + (filePage.Length * 20)
+            + (diagnosticsSummary.Length * 20)
+            + (validationCommands.Length * 20));
 
         return ToolResponse<ContextPackResult>.Ok(
             $"Built context pack with {primarySymbols.Count} symbols and {filePage.Length} files.",
@@ -83,6 +121,8 @@ public sealed class AdvancedSemanticService(
                 TestSummary = testSummary,
                 DiagnosticSummary = diagnosticsSummary,
                 SelectedFiles = filePage,
+                ValidationCommands = validationCommands,
+                RecommendedNextTools = recommendedNextTools,
                 EstimatedTokens = estimatedTokens,
                 Truncated = selectedFiles.Count > filePage.Length || estimatedTokens >= maxTokens
             }],
@@ -366,6 +406,7 @@ public sealed class AdvancedSemanticService(
         var repoRoot = repoRootResolver.Resolve(scope?.RepoRoot);
         var files = Directory.EnumerateFiles(repoRoot, "*.cs", SearchOption.AllDirectories)
             .Where(IsGeneratedPath)
+            .Where(path => !IsExcludedPath(repoRoot, path))
             .Select(path => RelativePath(repoRoot, path))
             .Where(path => string.IsNullOrWhiteSpace(query) || path.Contains(query, StringComparison.OrdinalIgnoreCase))
             .Take(Math.Clamp(maxItems, 1, 500))
@@ -694,11 +735,47 @@ public sealed class AdvancedSemanticService(
         return NormalizePath(value).Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? value;
     }
 
+    private static IReadOnlyList<string> RecommendedNextTools(
+        IReadOnlyList<string>? symbolIds,
+        IReadOnlyList<string>? files,
+        IReadOnlyList<string> validationCommands)
+    {
+        var tools = new List<string>();
+        if (symbolIds?.Count > 0 || files?.Count > 0)
+        {
+            tools.Add("cs_change_impact");
+            tools.Add("cs_test_impact");
+        }
+
+        if (validationCommands.Count == 0)
+        {
+            tools.Add("cs_diagnostics_summary");
+        }
+
+        return tools.Distinct(StringComparer.Ordinal).ToArray();
+    }
+
     private static bool IsGeneratedPath(string path)
     {
         return path.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
             || path.EndsWith(".generated.cs", StringComparison.OrdinalIgnoreCase)
             || path.EndsWith(".designer.cs", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsExcludedPath(string repoRoot, string path)
+    {
+        var relative = RelativePath(repoRoot, path);
+        var segments = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Any(segment => segment.Equals("bin", StringComparison.OrdinalIgnoreCase)
+            || segment.Equals("obj", StringComparison.OrdinalIgnoreCase)
+            || segment.Equals(".git", StringComparison.OrdinalIgnoreCase)
+            || segment.Equals(".vs", StringComparison.OrdinalIgnoreCase)
+            || segment.Equals(".idea", StringComparison.OrdinalIgnoreCase)
+            || segment.Equals(".vscode", StringComparison.OrdinalIgnoreCase)
+            || segment.Equals("node_modules", StringComparison.OrdinalIgnoreCase)
+            || segment.Equals("packages", StringComparison.OrdinalIgnoreCase)
+            || segment.Equals("TestResults", StringComparison.OrdinalIgnoreCase)
+            || segment.Equals("coverage", StringComparison.OrdinalIgnoreCase));
     }
 
     private sealed record SemanticLoadContext(

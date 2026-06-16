@@ -12,5 +12,5 @@ For targeted test selection:
 - Use `cs_find_references` and `cs_callers` to find affected production and test code.
 - Use `cs_change_impact` and `cs_test_impact` when symbol IDs or changed files are known.
 - Use `cs_diagnostics` to check the current compiler state before and after edits.
-- Prefer targeted tests for the affected project and nearby test project before a full solution test run.
+- Prefer the `command` returned by `cs_test_impact` before a full solution test run.
 - Explain test choices from impact output, references, callers, diagnostics, and project naming.

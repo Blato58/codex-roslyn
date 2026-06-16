@@ -15,6 +15,7 @@ public sealed class RepoTools(
     SolutionSelectionService solutionSelectionService,
     SemanticQueryService semanticQueryService,
     RefactorPreviewService refactorPreviewService,
+    ImpactAnalysisService impactAnalysisService,
     AdvancedSemanticService advancedSemanticService)
 {
     [McpServerTool]
@@ -207,7 +208,7 @@ public sealed class RepoTools(
         int maxItems = 50,
         string? cursor = null)
     {
-        return refactorPreviewService.ChangeImpactAsync(symbolIds, changedFiles, scope, detailLevel, maxItems);
+        return impactAnalysisService.ChangeImpactAsync(symbolIds, changedFiles, scope, detailLevel, maxItems);
     }
 
     [McpServerTool]
@@ -220,7 +221,7 @@ public sealed class RepoTools(
         int maxItems = 50,
         string? cursor = null)
     {
-        return refactorPreviewService.TestImpactAsync(symbolIds, changedFiles, scope, detailLevel, maxItems);
+        return impactAnalysisService.TestImpactAsync(symbolIds, changedFiles, scope, detailLevel, maxItems);
     }
 
     [McpServerTool]

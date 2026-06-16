@@ -43,6 +43,26 @@ public sealed class BashGuardServiceTests
         Assert.Contains("prefer cs_symbol_search", result.AdditionalContext);
     }
 
+    [Fact]
+    public void EvaluateHookInput_WarnsForBroadDotnetTestCommand()
+    {
+        var service = new BashGuardService();
+        var result = service.EvaluateHookInput("""{"toolInput":{"command":"dotnet test --no-restore"}}""");
+
+        Assert.True(result.HasWarning);
+        Assert.Contains("cs_test_impact", result.AdditionalContext);
+    }
+
+    [Fact]
+    public void EvaluateHookInput_AllowsTargetedDotnetTestCommand()
+    {
+        var service = new BashGuardService();
+        var result = service.EvaluateHookInput("""{"toolInput":{"command":"dotnet test tests/Sample.Tests/Sample.Tests.csproj --filter FullyQualifiedName~SampleTests"}}""");
+
+        Assert.False(result.HasWarning);
+        Assert.Null(result.AdditionalContext);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("{not json")]

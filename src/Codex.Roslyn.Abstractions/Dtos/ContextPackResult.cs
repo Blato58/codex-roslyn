@@ -14,6 +14,10 @@ public sealed record ContextPackResult
 
     public IReadOnlyList<string> SelectedFiles { get; init; } = [];
 
+    public IReadOnlyList<string> ValidationCommands { get; init; } = [];
+
+    public IReadOnlyList<string> RecommendedNextTools { get; init; } = [];
+
     public int EstimatedTokens { get; init; }
 
     public bool Truncated { get; init; }

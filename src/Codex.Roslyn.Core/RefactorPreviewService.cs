@@ -161,123 +161,6 @@ public sealed class RefactorPreviewService(
             "cold");
     }
 
-    public async Task<ToolResponse<ChangeImpactResult>> ChangeImpactAsync(
-        IReadOnlyList<string>? symbolIds = null,
-        IReadOnlyList<string>? changedFiles = null,
-        ToolScope? scope = null,
-        string detailLevel = "normal",
-        int maxItems = 50,
-        CancellationToken cancellationToken = default)
-    {
-        var loaded = await LoadAsync(scope, detailLevel, cancellationToken);
-        if (loaded.ResponseKind is not null)
-        {
-            return Empty<ChangeImpactResult>(loaded.ResponseKind, loaded.Summary, detailLevel, loaded.Warning);
-        }
-
-        var impactedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var changedFile in changedFiles ?? [])
-        {
-            impactedFiles.Add(NormalizePath(changedFile));
-        }
-
-        var reasons = new List<string>();
-        foreach (var symbolId in symbolIds ?? [])
-        {
-            if (!symbolCache.TryGet(symbolId, out var symbol))
-            {
-                reasons.Add($"Symbol {symbolId} is not in the warm semantic cache.");
-                continue;
-            }
-
-            var references = await SymbolFinder.FindReferencesAsync(symbol, loaded.Handle!.Solution, cancellationToken);
-            foreach (var path in GetReferenceFiles(loaded.Handle.Solution, loaded.RepoRoot, references))
-            {
-                impactedFiles.Add(path);
-            }
-
-            reasons.Add($"Semantic references for {symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)} were inspected.");
-        }
-
-        var files = impactedFiles.Take(Math.Clamp(maxItems, 1, 500)).ToArray();
-        var grouped = files
-            .GroupBy(GetImpactArea, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new ChangeImpactResult
-            {
-                Area = group.Key,
-                Kind = group.Key.Contains("test", StringComparison.OrdinalIgnoreCase) ? "test" : "source",
-                Confidence = reasons.Count > 0 ? "high" : "medium",
-                Reasons = reasons.Count > 0 ? reasons : ["Changed files were grouped by path and project naming."],
-                Files = group.ToArray()
-            })
-            .ToArray();
-
-        return ToolResponse<ChangeImpactResult>.Ok(
-            $"Identified {grouped.Length} impacted areas across {files.Length} files.",
-            grouped,
-            detailLevel,
-            "hit",
-            "warm");
-    }
-
-    public async Task<ToolResponse<TestImpactResult>> TestImpactAsync(
-        IReadOnlyList<string>? symbolIds = null,
-        IReadOnlyList<string>? changedFiles = null,
-        ToolScope? scope = null,
-        string detailLevel = "normal",
-        int maxItems = 50,
-        CancellationToken cancellationToken = default)
-    {
-        var impact = await ChangeImpactAsync(symbolIds, changedFiles, scope, detailLevel, maxItems, cancellationToken);
-        if (impact.ResultKind != "ok")
-        {
-            return new ToolResponse<TestImpactResult>
-            {
-                ResultKind = impact.ResultKind,
-                Summary = impact.Summary,
-                Items = [],
-                CacheStatus = impact.CacheStatus,
-                TokenPolicy = impact.TokenPolicy,
-                Warnings = impact.Warnings
-            };
-        }
-
-        var testFiles = impact.Items
-            .SelectMany(item => item.Files)
-            .Where(file => file.Contains("test", StringComparison.OrdinalIgnoreCase))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(Math.Clamp(maxItems, 1, 500))
-            .ToArray();
-
-        var items = testFiles.Length == 0
-            ? [new TestImpactResult
-            {
-                TestArea = "targeted_project_tests",
-                Confidence = "medium",
-                Reasons = ["No direct test file reference was found; run tests for projects adjacent to impacted source files."],
-                Files = impact.Items.SelectMany(item => item.Files).ToArray()
-            }]
-            : impact.Items
-                .SelectMany(item => item.Files)
-                .Where(file => file.Contains("test", StringComparison.OrdinalIgnoreCase))
-                .GroupBy(GetImpactArea, StringComparer.OrdinalIgnoreCase)
-                .Select(group => new TestImpactResult
-                {
-                    TestArea = group.Key,
-                    Confidence = "high",
-                    Reasons = ["Test files were directly referenced or grouped with impacted symbols."],
-                    Files = group.Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
-                })
-                .ToArray();
-
-        return ToolResponse<TestImpactResult>.Ok(
-            $"Recommended {items.Length} test areas.",
-            items,
-            detailLevel,
-            "hit",
-            "warm");
-    }
-
     private async Task<ToolResponse<RefactorPreviewResult>> PreviewRenameAsync(
         string? symbolId,
         string? newName,
@@ -1142,29 +1025,6 @@ public sealed class RefactorPreviewService(
             });
     }
 
-    private static IEnumerable<string> GetReferenceFiles(
-        Solution solution,
-        string repoRoot,
-        IEnumerable<ReferencedSymbol> references)
-    {
-        foreach (var referencedSymbol in references)
-        {
-            foreach (var location in referencedSymbol.Definition.Locations.Concat(referencedSymbol.Locations.Select(reference => reference.Location)))
-            {
-                if (location.SourceTree is null)
-                {
-                    continue;
-                }
-
-                var document = solution.GetDocument(location.SourceTree);
-                if (document?.FilePath is not null)
-                {
-                    yield return RelativePath(repoRoot, document.FilePath);
-                }
-            }
-        }
-    }
-
     private static ToolResponse<TItem> Empty<TItem>(string resultKind, string summary, string detailLevel, string? warning = null)
     {
         return new ToolResponse<TItem>
@@ -1280,17 +1140,6 @@ public sealed class RefactorPreviewService(
         }
 
         return reasons.Count > 0 ? "medium" : "low";
-    }
-
-    private static string GetImpactArea(string file)
-    {
-        var parts = NormalizePath(file).Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length >= 2 && (parts[0] is "src" or "tests" or "test"))
-        {
-            return $"{parts[0]}/{parts[1]}";
-        }
-
-        return parts.FirstOrDefault() ?? "repo";
     }
 
     private static string GetProjectLikeSegment(string file)

@@ -29,6 +29,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<BashGuardService>();
         services.AddSingleton<WorkspaceEditCache>();
         services.AddSingleton<RefactorPreviewService>();
+        services.AddSingleton<ImpactAnalysisService>();
         services.AddSingleton<AdvancedSemanticService>();
 
         return services;
