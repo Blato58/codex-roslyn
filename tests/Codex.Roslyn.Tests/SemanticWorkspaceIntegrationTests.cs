@@ -137,10 +137,12 @@ public sealed class SemanticWorkspaceIntegrationTests
         var missingSymbol = await refactors.PreviewAsync("move_type_to_file", file: "src/SampleLib/Moved.cs", scope: new ToolScope { RepoRoot = repo });
         var missingFile = await refactors.PreviewAsync("move_type_to_file", classSymbol.Items.Single().SymbolId, scope: new ToolScope { RepoRoot = repo });
         var nonType = await refactors.PreviewAsync("move_type_to_file", methodSymbol.Items.Single().SymbolId, file: "src/SampleLib/Moved.cs", scope: new ToolScope { RepoRoot = repo });
+        var sameFile = await refactors.PreviewAsync("move_type_to_file", classSymbol.Items.Single().SymbolId, file: "src/SampleLib/CustomerService.cs", scope: new ToolScope { RepoRoot = repo });
 
         Assert.Equal("stale_symbol", missingSymbol.ResultKind);
         Assert.Equal("invalid_request", missingFile.ResultKind);
         Assert.Equal("invalid_request", nonType.ResultKind);
+        Assert.Equal("invalid_request", sameFile.ResultKind);
     }
 
     [Fact]

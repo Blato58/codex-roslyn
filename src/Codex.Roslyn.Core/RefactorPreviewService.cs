@@ -421,9 +421,15 @@ public sealed class RefactorPreviewService(
             return MoveTypeChangesResult.Fail("invalid_request", "Move type preview could not resolve the source document.");
         }
 
+        var sourceFile = RelativePath(repoRoot, sourceDocument.FilePath);
+        if (string.Equals(sourceFile, destinationFile, StringComparison.OrdinalIgnoreCase))
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Destination file must be different from the source file.");
+        }
+
         var sourceText = await sourceDocument.GetTextAsync(cancellationToken);
         var sourceChange = new DocumentPreviewChanges(
-            RelativePath(repoRoot, sourceDocument.FilePath),
+            sourceFile,
             sourceDocument.Id,
             sourceText,
             [new TextChange(syntax.FullSpan, string.Empty)],
