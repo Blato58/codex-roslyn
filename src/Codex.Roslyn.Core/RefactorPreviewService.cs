@@ -5,6 +5,7 @@ using Codex.Roslyn.Abstractions.ToolContracts;
 using Codex.Roslyn.Index;
 using Codex.Roslyn.Workspaces;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Formatting;
 using Microsoft.CodeAnalysis.Text;
@@ -31,8 +32,8 @@ public sealed class RefactorPreviewService(
         {
             "rename" => await PreviewRenameAsync(symbolId, newName, scope, detailLevel, maxItems, cancellationToken),
             "organize_usings" => await PreviewOrganizeUsingsAsync(file, scope, detailLevel, maxItems, cancellationToken),
-            "move_type_to_file" or "move_type_to_namespace" or "extract_interface" or "change_namespace" =>
-                Unsupported<RefactorPreviewResult>(operation, detailLevel),
+            "move_type_to_file" => await PreviewMoveTypeToFileAsync(symbolId, file, scope, detailLevel, maxItems, cancellationToken),
+            "move_type_to_namespace" or "extract_interface" or "change_namespace" => Unsupported<RefactorPreviewResult>(operation, detailLevel),
             _ => Unsupported<RefactorPreviewResult>(operation, detailLevel)
         };
     }
@@ -255,6 +256,68 @@ public sealed class RefactorPreviewService(
             "warm");
     }
 
+    private async Task<ToolResponse<RefactorPreviewResult>> PreviewMoveTypeToFileAsync(
+        string? symbolId,
+        string? file,
+        ToolScope? scope,
+        string detailLevel,
+        int maxItems,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(symbolId) || !symbolCache.TryGet(symbolId, out var symbol))
+        {
+            return Empty<RefactorPreviewResult>("stale_symbol", "Symbol is not in the warm semantic cache. Use cs_symbol_at first.", detailLevel);
+        }
+
+        if (symbol is not INamedTypeSymbol namedType)
+        {
+            return Empty<RefactorPreviewResult>("invalid_request", "Move type preview requires a class, record, struct, interface, enum, or delegate symbol.", detailLevel);
+        }
+
+        if (string.IsNullOrWhiteSpace(file))
+        {
+            return Empty<RefactorPreviewResult>("invalid_request", "Move type preview requires file as the destination path.", detailLevel);
+        }
+
+        var loaded = await LoadAsync(scope, detailLevel, cancellationToken);
+        if (loaded.ResponseKind is not null)
+        {
+            return Empty<RefactorPreviewResult>(loaded.ResponseKind, loaded.Summary, detailLevel, loaded.Warning);
+        }
+
+        if (!TryNormalizeDestinationPath(loaded.RepoRoot, file, out var destinationFile, out var destinationError))
+        {
+            return Empty<RefactorPreviewResult>("invalid_request", destinationError, detailLevel);
+        }
+
+        var changes = await BuildMoveTypeToFileChangesAsync(loaded.Handle!.Solution, loaded.RepoRoot, namedType, destinationFile, cancellationToken);
+        if (changes.ResponseKind is not null)
+        {
+            return Empty<RefactorPreviewResult>(changes.ResponseKind, changes.Summary, detailLevel);
+        }
+
+        var beforeDiagnostics = await CountDiagnosticsAsync(loaded.Handle.Solution, cancellationToken);
+        var previewSolution = await ApplyChangesAsync(loaded.Handle.Solution, changes.Changes, cancellationToken);
+        var afterDiagnostics = await CountDiagnosticsAsync(previewSolution, cancellationToken);
+        var riskReasons = GetRiskReasons(namedType, changes.Changes, afterDiagnostics - beforeDiagnostics);
+        var result = CreatePreviewResult(
+            "move_type_to_file",
+            symbolId,
+            loaded.Solution!.SolutionId,
+            changes.Changes,
+            beforeDiagnostics,
+            afterDiagnostics,
+            riskReasons,
+            maxItems);
+
+        return ToolResponse<RefactorPreviewResult>.Ok(
+            $"Move type to file would update {result.ChangedSpans} spans across {result.ChangedFiles} files.",
+            [result],
+            detailLevel,
+            "hit",
+            "warm");
+    }
+
     private async Task<IReadOnlyList<DocumentPreviewChanges>> BuildRenameChangesAsync(
         Solution solution,
         string repoRoot,
@@ -306,6 +369,17 @@ public sealed class RefactorPreviewService(
             var document = preview.GetDocument(change.DocumentId);
             if (document is null)
             {
+                if (change.ProjectId is not null && change.FilePath is not null)
+                {
+                    var addedText = change.OriginalText.WithChanges(change.Changes);
+                    preview = preview.AddDocument(
+                        change.DocumentId,
+                        Path.GetFileName(change.FilePath),
+                        addedText,
+                        GetDocumentFolders(change.File),
+                        change.FilePath);
+                }
+
                 continue;
             }
 
@@ -315,6 +389,78 @@ public sealed class RefactorPreviewService(
         }
 
         return preview;
+    }
+
+    private static async Task<MoveTypeChangesResult> BuildMoveTypeToFileChangesAsync(
+        Solution solution,
+        string repoRoot,
+        INamedTypeSymbol namedType,
+        string destinationFile,
+        CancellationToken cancellationToken)
+    {
+        var declarationReference = namedType.DeclaringSyntaxReferences.FirstOrDefault(reference => reference.SyntaxTree is not null);
+        if (declarationReference is null)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Move type preview requires a source-declared type.");
+        }
+
+        var syntax = await declarationReference.GetSyntaxAsync(cancellationToken);
+        if (syntax is not BaseTypeDeclarationSyntax and not DelegateDeclarationSyntax)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Move type preview requires a type declaration.");
+        }
+
+        if (syntax.Parent is BaseTypeDeclarationSyntax)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Move type preview only supports top-level types in this slice.");
+        }
+
+        var sourceDocument = solution.GetDocument(declarationReference.SyntaxTree);
+        if (sourceDocument?.FilePath is null)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Move type preview could not resolve the source document.");
+        }
+
+        var sourceText = await sourceDocument.GetTextAsync(cancellationToken);
+        var sourceChange = new DocumentPreviewChanges(
+            RelativePath(repoRoot, sourceDocument.FilePath),
+            sourceDocument.Id,
+            sourceText,
+            [new TextChange(syntax.FullSpan, string.Empty)],
+            null,
+            sourceDocument.FilePath);
+
+        var destinationPath = Path.Combine(repoRoot, destinationFile.Replace('/', Path.DirectorySeparatorChar));
+        var destinationText = BuildMovedTypeText(syntax, namedType, declarationReference.SyntaxTree);
+        var destinationDocument = FindDocument(solution, repoRoot, destinationFile);
+        DocumentPreviewChanges destinationChange;
+        if (destinationDocument?.FilePath is not null)
+        {
+            var oldText = await destinationDocument.GetTextAsync(cancellationToken);
+            var insertText = oldText.Length == 0 || oldText.ToString().EndsWith(Environment.NewLine, StringComparison.Ordinal)
+                ? destinationText
+                : Environment.NewLine + destinationText;
+            destinationChange = new DocumentPreviewChanges(
+                destinationFile,
+                destinationDocument.Id,
+                oldText,
+                [new TextChange(new TextSpan(oldText.Length, 0), insertText)],
+                null,
+                destinationDocument.FilePath);
+        }
+        else
+        {
+            var documentId = DocumentId.CreateNewId(sourceDocument.Project.Id);
+            destinationChange = new DocumentPreviewChanges(
+                destinationFile,
+                documentId,
+                SourceText.From(string.Empty, Encoding.UTF8),
+                [new TextChange(new TextSpan(0, 0), destinationText)],
+                sourceDocument.Project.Id,
+                destinationPath);
+        }
+
+        return MoveTypeChangesResult.Ok([sourceChange, destinationChange]);
     }
 
     private static RefactorPreviewResult CreatePreviewResult(
@@ -362,12 +508,22 @@ public sealed class RefactorPreviewService(
             foreach (var textChange in change.Changes.Take(20))
             {
                 var line = change.OriginalText.Lines.GetLineFromPosition(textChange.Span.Start);
-                var oldText = change.OriginalText.ToString(textChange.Span).ReplaceLineEndings(" ");
-                builder.AppendLine($"@@ {line.LineNumber + 1}:{textChange.Span.Start - line.Start + 1} @@ {oldText} -> {textChange.NewText}");
+                var oldText = CompactChangeText(change.OriginalText.ToString(textChange.Span));
+                var newText = CompactChangeText(textChange.NewText);
+                builder.AppendLine($"@@ {line.LineNumber + 1}:{textChange.Span.Start - line.Start + 1} @@ {oldText} -> {newText}");
             }
         }
 
         return builder.ToString().TrimEnd();
+    }
+
+    private static string CompactChangeText(string? text)
+    {
+        const int maxLength = 160;
+        var compact = (text ?? string.Empty).ReplaceLineEndings(" ").Trim();
+        return compact.Length <= maxLength
+            ? compact
+            : compact[..maxLength] + "...";
     }
 
     private static IReadOnlyList<string> GetRiskReasons(ISymbol symbol, IReadOnlyList<DocumentPreviewChanges> changes, int newDiagnosticDelta)
@@ -520,9 +676,80 @@ public sealed class RefactorPreviewService(
         return path.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');
     }
 
+    private static bool TryNormalizeDestinationPath(string repoRoot, string file, out string destinationFile, out string error)
+    {
+        destinationFile = NormalizePath(file).TrimStart('/');
+        error = string.Empty;
+
+        if (Path.IsPathRooted(file))
+        {
+            error = "Destination file must be repo-relative.";
+            return false;
+        }
+
+        if (!destinationFile.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            error = "Destination file must be a .cs path.";
+            return false;
+        }
+
+        var repoFullPath = Path.GetFullPath(repoRoot);
+        var destinationFullPath = Path.GetFullPath(Path.Combine(repoFullPath, destinationFile.Replace('/', Path.DirectorySeparatorChar)));
+        var repoPrefix = repoFullPath.EndsWith(Path.DirectorySeparatorChar)
+            ? repoFullPath
+            : repoFullPath + Path.DirectorySeparatorChar;
+        if (!destinationFullPath.StartsWith(repoPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            error = "Destination file must stay inside the repository.";
+            return false;
+        }
+
+        destinationFile = NormalizePath(Path.GetRelativePath(repoFullPath, destinationFullPath));
+        return true;
+    }
+
     private static string RelativePath(string repoRoot, string path)
     {
         return NormalizePath(Path.GetRelativePath(repoRoot, path));
+    }
+
+    private static string BuildMovedTypeText(SyntaxNode syntax, INamedTypeSymbol namedType, SyntaxTree sourceTree)
+    {
+        var builder = new StringBuilder();
+        if (sourceTree.GetRoot() is CompilationUnitSyntax root)
+        {
+            foreach (var usingDirective in root.Usings)
+            {
+                builder.Append(usingDirective.ToFullString());
+            }
+
+            if (root.Usings.Count > 0)
+            {
+                builder.AppendLine();
+            }
+        }
+
+        var namespaceName = namedType.ContainingNamespace?.IsGlobalNamespace == false
+            ? namedType.ContainingNamespace.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)
+            : null;
+        if (!string.IsNullOrWhiteSpace(namespaceName))
+        {
+            builder.Append("namespace ");
+            builder.Append(namespaceName);
+            builder.AppendLine(";");
+            builder.AppendLine();
+        }
+
+        builder.AppendLine(syntax.ToFullString().Trim());
+        return builder.ToString();
+    }
+
+    private static IReadOnlyList<string> GetDocumentFolders(string file)
+    {
+        var directory = Path.GetDirectoryName(NormalizePath(file));
+        return string.IsNullOrWhiteSpace(directory)
+            ? []
+            : directory.Split('/', StringSplitOptions.RemoveEmptyEntries);
     }
 
     private static string GetRisk(IReadOnlyList<string> reasons, int newDiagnosticDelta)
@@ -569,7 +796,25 @@ public sealed class RefactorPreviewService(
         string File,
         DocumentId DocumentId,
         SourceText OriginalText,
-        IReadOnlyList<TextChange> Changes);
+        IReadOnlyList<TextChange> Changes,
+        ProjectId? ProjectId = null,
+        string? FilePath = null);
+
+    private sealed record MoveTypeChangesResult(
+        string? ResponseKind,
+        string Summary,
+        IReadOnlyList<DocumentPreviewChanges> Changes)
+    {
+        public static MoveTypeChangesResult Ok(IReadOnlyList<DocumentPreviewChanges> changes)
+        {
+            return new MoveTypeChangesResult(null, string.Empty, changes);
+        }
+
+        public static MoveTypeChangesResult Fail(string responseKind, string summary)
+        {
+            return new MoveTypeChangesResult(responseKind, summary, []);
+        }
+    }
 
     private sealed record SemanticLoadContext(
         string RepoRoot,

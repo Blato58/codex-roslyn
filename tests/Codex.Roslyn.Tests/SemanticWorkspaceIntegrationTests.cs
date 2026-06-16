@@ -90,14 +90,57 @@ public sealed class SemanticWorkspaceIntegrationTests
     }
 
     [Fact]
-    public async Task RefactorPreview_ReturnsUnsupportedForMoveTypeSlice()
+    public async Task RefactorPreview_MoveTypeToFileReturnsCompactDiffWithoutMutatingFiles()
     {
+        var repo = CreateSemanticRepo();
         using var services = CreateServices(out _);
+        services.GetRequiredService<ColdIndexService>().Build(repo);
+        var solutionId = services.GetRequiredService<SolutionDiscoveryService>().Discover(repo).Single().SolutionId;
+        services.GetRequiredService<SolutionSelectionService>().Select(solutionId, new ToolScope { RepoRoot = repo });
+        var semantic = services.GetRequiredService<SemanticQueryService>();
+        var refactors = services.GetRequiredService<RefactorPreviewService>();
+        var sourcePath = Path.Combine(repo, "src", "SampleLib", "CustomerService.cs");
+        var classPosition = FindPosition(sourcePath, "CustomerService");
+        var classSymbol = await semantic.SymbolAtAsync("src/SampleLib/CustomerService.cs", classPosition.Line, classPosition.Column, new ToolScope { RepoRoot = repo });
 
-        var preview = await services.GetRequiredService<RefactorPreviewService>()
-            .PreviewAsync("move_type_to_file", scope: new ToolScope { RepoRoot = CreateTempDirectory() });
+        var preview = await refactors.PreviewAsync(
+            "move_type_to_file",
+            classSymbol.Items.Single().SymbolId,
+            file: "src/SampleLib/CustomerService.Moved.cs",
+            scope: new ToolScope { RepoRoot = repo });
 
-        Assert.Equal("unsupported_operation", preview.ResultKind);
+        Assert.Equal("ok", preview.ResultKind);
+        Assert.Equal("move_type_to_file", preview.Items.Single().Operation);
+        Assert.Equal(2, preview.Items.Single().ChangedFiles);
+        Assert.True(preview.Items.Single().ChangedSpans >= 2);
+        Assert.Contains("src/SampleLib/CustomerService.Moved.cs", preview.Items.Single().DiffPreview);
+        Assert.Contains("CustomerService", File.ReadAllText(sourcePath));
+        Assert.False(File.Exists(Path.Combine(repo, "src", "SampleLib", "CustomerService.Moved.cs")));
+    }
+
+    [Fact]
+    public async Task RefactorPreview_MoveTypeToFileValidatesInputs()
+    {
+        var repo = CreateSemanticRepo();
+        using var services = CreateServices(out _);
+        services.GetRequiredService<ColdIndexService>().Build(repo);
+        var solutionId = services.GetRequiredService<SolutionDiscoveryService>().Discover(repo).Single().SolutionId;
+        services.GetRequiredService<SolutionSelectionService>().Select(solutionId, new ToolScope { RepoRoot = repo });
+        var semantic = services.GetRequiredService<SemanticQueryService>();
+        var refactors = services.GetRequiredService<RefactorPreviewService>();
+        var sourcePath = Path.Combine(repo, "src", "SampleLib", "CustomerService.cs");
+        var classPosition = FindPosition(sourcePath, "CustomerService");
+        var classSymbol = await semantic.SymbolAtAsync("src/SampleLib/CustomerService.cs", classPosition.Line, classPosition.Column, new ToolScope { RepoRoot = repo });
+        var methodPosition = FindPosition(sourcePath, "GetAsync");
+        var methodSymbol = await semantic.SymbolAtAsync("src/SampleLib/CustomerService.cs", methodPosition.Line, methodPosition.Column, new ToolScope { RepoRoot = repo });
+
+        var missingSymbol = await refactors.PreviewAsync("move_type_to_file", file: "src/SampleLib/Moved.cs", scope: new ToolScope { RepoRoot = repo });
+        var missingFile = await refactors.PreviewAsync("move_type_to_file", classSymbol.Items.Single().SymbolId, scope: new ToolScope { RepoRoot = repo });
+        var nonType = await refactors.PreviewAsync("move_type_to_file", methodSymbol.Items.Single().SymbolId, file: "src/SampleLib/Moved.cs", scope: new ToolScope { RepoRoot = repo });
+
+        Assert.Equal("stale_symbol", missingSymbol.ResultKind);
+        Assert.Equal("invalid_request", missingFile.ResultKind);
+        Assert.Equal("invalid_request", nonType.ResultKind);
     }
 
     [Fact]
