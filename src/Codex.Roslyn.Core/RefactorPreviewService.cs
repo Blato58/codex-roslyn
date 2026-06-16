@@ -5,6 +5,7 @@ using Codex.Roslyn.Abstractions.ToolContracts;
 using Codex.Roslyn.Index;
 using Codex.Roslyn.Workspaces;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Formatting;
@@ -16,7 +17,8 @@ public sealed class RefactorPreviewService(
     SolutionSelectionService solutionSelectionService,
     WorkspaceManager workspaceManager,
     ColdIndexService coldIndexService,
-    SemanticSymbolCache symbolCache)
+    SemanticSymbolCache symbolCache,
+    WorkspaceEditCache editCache)
 {
     public async Task<ToolResponse<RefactorPreviewResult>> PreviewAsync(
         string operation,
@@ -33,9 +35,130 @@ public sealed class RefactorPreviewService(
             "rename" => await PreviewRenameAsync(symbolId, newName, scope, detailLevel, maxItems, cancellationToken),
             "organize_usings" => await PreviewOrganizeUsingsAsync(file, scope, detailLevel, maxItems, cancellationToken),
             "move_type_to_file" => await PreviewMoveTypeToFileAsync(symbolId, file, scope, detailLevel, maxItems, cancellationToken),
-            "move_type_to_namespace" or "extract_interface" or "change_namespace" => Unsupported<RefactorPreviewResult>(operation, detailLevel),
+            "move_type_to_namespace" or "change_namespace" => await PreviewChangeNamespaceAsync(NormalizeOperation(operation), symbolId, newName, scope, detailLevel, maxItems, cancellationToken),
+            "extract_interface" => await PreviewExtractInterfaceAsync(symbolId, newName, file, scope, detailLevel, maxItems, cancellationToken),
             _ => Unsupported<RefactorPreviewResult>(operation, detailLevel)
         };
+    }
+
+    public async Task<ToolResponse<WorkspaceEditApplyResult>> ApplyWorkspaceEditAsync(
+        string editId,
+        ToolScope? scope = null,
+        string detailLevel = "normal",
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(editId) || !editCache.TryGet(editId, out var edit))
+        {
+            return Empty<WorkspaceEditApplyResult>("unknown_edit", "Workspace edit was not found in this server process.", detailLevel);
+        }
+
+        var loaded = await LoadAsync(scope, detailLevel, cancellationToken);
+        if (loaded.ResponseKind is not null)
+        {
+            return Empty<WorkspaceEditApplyResult>(loaded.ResponseKind, loaded.Summary, detailLevel, loaded.Warning);
+        }
+
+        if (!string.Equals(Path.GetFullPath(edit.RepoRoot), Path.GetFullPath(loaded.RepoRoot), StringComparison.OrdinalIgnoreCase))
+        {
+            return Empty<WorkspaceEditApplyResult>("invalid_request", "Workspace edit belongs to a different repository.", detailLevel);
+        }
+
+        if (!string.Equals(edit.SolutionId, loaded.Solution!.SolutionId, StringComparison.Ordinal))
+        {
+            return Empty<WorkspaceEditApplyResult>("invalid_request", "Workspace edit belongs to a different solution.", detailLevel);
+        }
+
+        var repoRoot = Path.GetFullPath(loaded.RepoRoot);
+        var skipped = new List<string>();
+        var applied = new List<string>();
+        foreach (var file in edit.Files)
+        {
+            var fullPath = Path.GetFullPath(file.FullPath);
+            var repoPrefix = repoRoot.EndsWith(Path.DirectorySeparatorChar)
+                ? repoRoot
+                : repoRoot + Path.DirectorySeparatorChar;
+            if (!fullPath.StartsWith(repoPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                skipped.Add($"{file.RelativePath}: outside repository");
+                continue;
+            }
+
+            if (file.OriginalHash is null)
+            {
+                if (File.Exists(fullPath))
+                {
+                    skipped.Add($"{file.RelativePath}: file already exists");
+                    continue;
+                }
+            }
+            else
+            {
+                if (!File.Exists(fullPath))
+                {
+                    skipped.Add($"{file.RelativePath}: file no longer exists");
+                    continue;
+                }
+
+                var currentHash = WorkspaceEditCache.HashText(await File.ReadAllTextAsync(fullPath, cancellationToken));
+                if (!string.Equals(currentHash, file.OriginalHash, StringComparison.Ordinal))
+                {
+                    skipped.Add($"{file.RelativePath}: file changed since preview");
+                    continue;
+                }
+            }
+        }
+
+        if (skipped.Count > 0)
+        {
+            return new ToolResponse<WorkspaceEditApplyResult>
+            {
+                ResultKind = "stale_edit",
+                Summary = "Workspace edit was not applied because one or more files changed or were unsafe.",
+                Items =
+                [
+                    new WorkspaceEditApplyResult
+                    {
+                        EditId = edit.EditId,
+                        Operation = edit.Operation,
+                        SkippedFiles = skipped,
+                        DiagnosticsBefore = edit.DiagnosticsBefore,
+                        DiagnosticsAfter = edit.DiagnosticsAfter
+                    }
+                ],
+                CacheStatus = new CacheStatus { Index = "hit", Workspace = "warm" },
+                TokenPolicy = new TokenPolicy { DetailLevel = detailLevel, EstimatedTokens = 160 }
+            };
+        }
+
+        foreach (var file in edit.Files.Where(file => file.Edits > 0))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(file.FullPath)!);
+            await File.WriteAllTextAsync(file.FullPath, file.NewText, cancellationToken);
+            applied.Add(file.RelativePath);
+        }
+
+        editCache.Remove(editId);
+        workspaceManager.MarkAllStale();
+        coldIndexService.MarkDirty(loaded.RepoRoot);
+
+        var result = new WorkspaceEditApplyResult
+        {
+            EditId = edit.EditId,
+            Operation = edit.Operation,
+            AppliedFiles = applied.Count,
+            AppliedSpans = edit.Files.Sum(file => file.Edits),
+            AppliedFilePaths = applied,
+            DiagnosticsBefore = edit.DiagnosticsBefore,
+            DiagnosticsAfter = edit.DiagnosticsAfter,
+            RollbackWarning = applied.Count == 0 ? null : "No automatic rollback was created; use source control to review or revert applied changes."
+        };
+
+        return ToolResponse<WorkspaceEditApplyResult>.Ok(
+            $"Applied {result.AppliedSpans} spans across {result.AppliedFiles} files.",
+            [result],
+            detailLevel,
+            "stale",
+            "cold");
     }
 
     public async Task<ToolResponse<ChangeImpactResult>> ChangeImpactAsync(
@@ -193,6 +316,7 @@ public sealed class RefactorPreviewService(
             afterDiagnostics,
             riskReasons,
             maxItems);
+        StorePreview(loaded.RepoRoot, result, changes);
 
         return ToolResponse<RefactorPreviewResult>.Ok(
             $"Rename would update {result.ChangedSpans} spans across {result.ChangedFiles} files.",
@@ -235,7 +359,7 @@ public sealed class RefactorPreviewService(
         var relative = RelativePath(loaded.RepoRoot, document.FilePath!);
         DocumentPreviewChanges[] changes = textChanges.Length == 0
             ? []
-            : [new DocumentPreviewChanges(relative, document.Id, oldText, textChanges)];
+            : [new DocumentPreviewChanges(relative, document.Id, oldText, textChanges, null, document.FilePath)];
         var beforeDiagnostics = await CountDiagnosticsAsync(loaded.Handle.Solution, cancellationToken);
         var afterDiagnostics = beforeDiagnostics;
         var result = CreatePreviewResult(
@@ -247,6 +371,7 @@ public sealed class RefactorPreviewService(
             afterDiagnostics,
             [],
             maxItems);
+        StorePreview(loaded.RepoRoot, result, changes);
 
         return ToolResponse<RefactorPreviewResult>.Ok(
             $"Organize usings would update {result.ChangedSpans} spans across {result.ChangedFiles} files.",
@@ -309,9 +434,138 @@ public sealed class RefactorPreviewService(
             afterDiagnostics,
             riskReasons,
             maxItems);
+        StorePreview(loaded.RepoRoot, result, changes.Changes);
 
         return ToolResponse<RefactorPreviewResult>.Ok(
             $"Move type to file would update {result.ChangedSpans} spans across {result.ChangedFiles} files.",
+            [result],
+            detailLevel,
+            "hit",
+            "warm");
+    }
+
+    private async Task<ToolResponse<RefactorPreviewResult>> PreviewChangeNamespaceAsync(
+        string operation,
+        string? symbolId,
+        string? newName,
+        ToolScope? scope,
+        string detailLevel,
+        int maxItems,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(symbolId) || !symbolCache.TryGet(symbolId, out var symbol))
+        {
+            return Empty<RefactorPreviewResult>("stale_symbol", "Namespace preview requires a warm named type symbol. Use cs_symbol_at first.", detailLevel);
+        }
+
+        if (symbol is not INamedTypeSymbol namedType)
+        {
+            return Empty<RefactorPreviewResult>("invalid_request", "Namespace preview requires a named type symbol.", detailLevel);
+        }
+
+        if (string.IsNullOrWhiteSpace(newName))
+        {
+            return Empty<RefactorPreviewResult>("invalid_request", "Namespace preview requires newName.", detailLevel);
+        }
+
+        var loaded = await LoadAsync(scope, detailLevel, cancellationToken);
+        if (loaded.ResponseKind is not null)
+        {
+            return Empty<RefactorPreviewResult>(loaded.ResponseKind, loaded.Summary, detailLevel, loaded.Warning);
+        }
+
+        var changes = await BuildChangeNamespaceChangesAsync(loaded.Handle!.Solution, loaded.RepoRoot, namedType, newName, cancellationToken);
+        if (changes.ResponseKind is not null)
+        {
+            return Empty<RefactorPreviewResult>(changes.ResponseKind, changes.Summary, detailLevel);
+        }
+
+        var beforeDiagnostics = await CountDiagnosticsAsync(loaded.Handle.Solution, cancellationToken);
+        var previewSolution = await ApplyChangesAsync(loaded.Handle.Solution, changes.Changes, cancellationToken);
+        var afterDiagnostics = await CountDiagnosticsAsync(previewSolution, cancellationToken);
+        var riskReasons = GetRiskReasons(namedType, changes.Changes, afterDiagnostics - beforeDiagnostics);
+        var result = CreatePreviewResult(
+            operation,
+            symbolId,
+            loaded.Solution!.SolutionId,
+            changes.Changes,
+            beforeDiagnostics,
+            afterDiagnostics,
+            riskReasons,
+            maxItems);
+        StorePreview(loaded.RepoRoot, result, changes.Changes);
+
+        return ToolResponse<RefactorPreviewResult>.Ok(
+            $"{operation} would update {result.ChangedSpans} spans across {result.ChangedFiles} files.",
+            [result],
+            detailLevel,
+            "hit",
+            "warm");
+    }
+
+    private async Task<ToolResponse<RefactorPreviewResult>> PreviewExtractInterfaceAsync(
+        string? symbolId,
+        string? newName,
+        string? file,
+        ToolScope? scope,
+        string detailLevel,
+        int maxItems,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(symbolId) || !symbolCache.TryGet(symbolId, out var symbol))
+        {
+            return Empty<RefactorPreviewResult>("stale_symbol", "Extract interface preview requires a warm class symbol. Use cs_symbol_at first.", detailLevel);
+        }
+
+        if (symbol is not INamedTypeSymbol { TypeKind: TypeKind.Class } namedType)
+        {
+            return Empty<RefactorPreviewResult>("invalid_request", "Extract interface preview requires a class symbol.", detailLevel);
+        }
+
+        var interfaceName = string.IsNullOrWhiteSpace(newName) ? "I" + namedType.Name : newName.Trim();
+        var loaded = await LoadAsync(scope, detailLevel, cancellationToken);
+        if (loaded.ResponseKind is not null)
+        {
+            return Empty<RefactorPreviewResult>(loaded.ResponseKind, loaded.Summary, detailLevel, loaded.Warning);
+        }
+
+        var destinationFile = file;
+        if (string.IsNullOrWhiteSpace(destinationFile))
+        {
+            var declarationPath = namedType.Locations.FirstOrDefault(location => location.IsInSource)?.GetLineSpan().Path;
+            var sourceRelative = declarationPath is null ? $"{interfaceName}.cs" : RelativePath(loaded.RepoRoot, declarationPath);
+            var directory = Path.GetDirectoryName(NormalizePath(sourceRelative))?.Replace('\\', '/');
+            destinationFile = string.IsNullOrWhiteSpace(directory) ? $"{interfaceName}.cs" : $"{directory}/{interfaceName}.cs";
+        }
+
+        if (!TryNormalizeDestinationPath(loaded.RepoRoot, destinationFile, out destinationFile, out var destinationError))
+        {
+            return Empty<RefactorPreviewResult>("invalid_request", destinationError, detailLevel);
+        }
+
+        var changes = await BuildExtractInterfaceChangesAsync(loaded.Handle!.Solution, loaded.RepoRoot, namedType, interfaceName, destinationFile, cancellationToken);
+        if (changes.ResponseKind is not null)
+        {
+            return Empty<RefactorPreviewResult>(changes.ResponseKind, changes.Summary, detailLevel);
+        }
+
+        var beforeDiagnostics = await CountDiagnosticsAsync(loaded.Handle.Solution, cancellationToken);
+        var previewSolution = await ApplyChangesAsync(loaded.Handle.Solution, changes.Changes, cancellationToken);
+        var afterDiagnostics = await CountDiagnosticsAsync(previewSolution, cancellationToken);
+        var riskReasons = GetRiskReasons(namedType, changes.Changes, afterDiagnostics - beforeDiagnostics);
+        var result = CreatePreviewResult(
+            "extract_interface",
+            symbolId,
+            loaded.Solution!.SolutionId,
+            changes.Changes,
+            beforeDiagnostics,
+            afterDiagnostics,
+            riskReasons,
+            maxItems);
+        StorePreview(loaded.RepoRoot, result, changes.Changes);
+
+        return ToolResponse<RefactorPreviewResult>.Ok(
+            $"Extract interface would update {result.ChangedSpans} spans across {result.ChangedFiles} files.",
             [result],
             detailLevel,
             "hit",
@@ -352,7 +606,7 @@ public sealed class RefactorPreviewService(
                 .OrderByDescending(change => change.Span.Start)
                 .ToArray();
 
-            changes.Add(new DocumentPreviewChanges(RelativePath(repoRoot, document.FilePath), document.Id, oldText, textChanges));
+            changes.Add(new DocumentPreviewChanges(RelativePath(repoRoot, document.FilePath), document.Id, oldText, textChanges, null, document.FilePath));
         }
 
         return changes;
@@ -469,6 +723,168 @@ public sealed class RefactorPreviewService(
         return MoveTypeChangesResult.Ok([sourceChange, destinationChange]);
     }
 
+    private static async Task<MoveTypeChangesResult> BuildChangeNamespaceChangesAsync(
+        Solution solution,
+        string repoRoot,
+        INamedTypeSymbol namedType,
+        string newNamespace,
+        CancellationToken cancellationToken)
+    {
+        var declarationReference = namedType.DeclaringSyntaxReferences.FirstOrDefault(reference => reference.SyntaxTree is not null);
+        if (declarationReference is null)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Namespace preview requires a source-declared type.");
+        }
+
+        var sourceDocument = solution.GetDocument(declarationReference.SyntaxTree);
+        if (sourceDocument?.FilePath is null)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Namespace preview could not resolve the source document.");
+        }
+
+        var root = await declarationReference.SyntaxTree.GetRootAsync(cancellationToken);
+        SyntaxNode? namespaceNode = root.DescendantNodes()
+            .OfType<FileScopedNamespaceDeclarationSyntax>()
+            .FirstOrDefault();
+        namespaceNode ??= root.DescendantNodes()
+            .OfType<NamespaceDeclarationSyntax>()
+            .FirstOrDefault();
+        if (namespaceNode is null)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Namespace preview requires a file-scoped or block-scoped namespace.");
+        }
+
+        var oldText = await sourceDocument.GetTextAsync(cancellationToken);
+        TextSpan span = namespaceNode switch
+        {
+            FileScopedNamespaceDeclarationSyntax fileScoped => fileScoped.Name.Span,
+            NamespaceDeclarationSyntax blockScoped => blockScoped.Name.Span,
+            _ => default
+        };
+        if (span == default)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Namespace preview could not locate the namespace name span.");
+        }
+
+        var change = new DocumentPreviewChanges(
+            RelativePath(repoRoot, sourceDocument.FilePath),
+            sourceDocument.Id,
+            oldText,
+            [new TextChange(span, newNamespace)],
+            null,
+            sourceDocument.FilePath);
+
+        return MoveTypeChangesResult.Ok([change]);
+    }
+
+    private static async Task<MoveTypeChangesResult> BuildExtractInterfaceChangesAsync(
+        Solution solution,
+        string repoRoot,
+        INamedTypeSymbol namedType,
+        string interfaceName,
+        string destinationFile,
+        CancellationToken cancellationToken)
+    {
+        var declarationReference = namedType.DeclaringSyntaxReferences.FirstOrDefault(reference => reference.SyntaxTree is not null);
+        if (declarationReference is null)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Extract interface preview requires a source-declared class.");
+        }
+
+        var syntax = await declarationReference.GetSyntaxAsync(cancellationToken);
+        if (syntax is not ClassDeclarationSyntax classDeclaration)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Extract interface preview requires a class declaration.");
+        }
+
+        var sourceDocument = solution.GetDocument(declarationReference.SyntaxTree);
+        if (sourceDocument?.FilePath is null)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Extract interface preview could not resolve the source document.");
+        }
+
+        var members = namedType.GetMembers()
+            .Where(member => member.DeclaredAccessibility == Accessibility.Public && !member.IsStatic)
+            .Where(member => member is IMethodSymbol { MethodKind: MethodKind.Ordinary } or IPropertySymbol)
+            .Select(member => member switch
+            {
+                IMethodSymbol method => $"{method.ReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {method.Name}({string.Join(", ", method.Parameters.Select(parameter => $"{parameter.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {parameter.Name}"))});",
+                IPropertySymbol property => $"{property.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {property.Name} {{ get; }}",
+                _ => string.Empty
+            })
+            .Where(member => !string.IsNullOrWhiteSpace(member))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (members.Length == 0)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Extract interface preview found no public instance members to include.");
+        }
+
+        var namespaceName = namedType.ContainingNamespace?.IsGlobalNamespace == false
+            ? namedType.ContainingNamespace.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)
+            : null;
+        var builder = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(namespaceName))
+        {
+            builder.Append("namespace ");
+            builder.Append(namespaceName);
+            builder.AppendLine(";");
+            builder.AppendLine();
+        }
+
+        builder.Append("public interface ");
+        builder.AppendLine(interfaceName);
+        builder.AppendLine("{");
+        foreach (var member in members)
+        {
+            builder.Append("    ");
+            builder.AppendLine(member);
+        }
+
+        builder.AppendLine("}");
+
+        var destinationPath = Path.Combine(repoRoot, destinationFile.Replace('/', Path.DirectorySeparatorChar));
+        var destinationDocument = FindDocument(solution, repoRoot, destinationFile);
+        DocumentPreviewChanges destinationChange;
+        if (destinationDocument?.FilePath is not null)
+        {
+            var destinationOldText = await destinationDocument.GetTextAsync(cancellationToken);
+            var insertText = destinationOldText.Length == 0 || destinationOldText.ToString().EndsWith(Environment.NewLine, StringComparison.Ordinal)
+                ? builder.ToString()
+                : Environment.NewLine + builder;
+            destinationChange = new DocumentPreviewChanges(
+                destinationFile,
+                destinationDocument.Id,
+                destinationOldText,
+                [new TextChange(new TextSpan(destinationOldText.Length, 0), insertText)],
+                null,
+                destinationDocument.FilePath);
+        }
+        else
+        {
+            destinationChange = new DocumentPreviewChanges(
+                destinationFile,
+                DocumentId.CreateNewId(sourceDocument.Project.Id),
+                SourceText.From(string.Empty, Encoding.UTF8),
+                [new TextChange(new TextSpan(0, 0), builder.ToString())],
+                sourceDocument.Project.Id,
+                destinationPath);
+        }
+
+        var sourceText = await sourceDocument.GetTextAsync(cancellationToken);
+        var updatedClass = classDeclaration.AddBaseListTypes(
+            SyntaxFactory.SimpleBaseType(SyntaxFactory.IdentifierName(interfaceName)));
+        var sourceChange = new DocumentPreviewChanges(
+            RelativePath(repoRoot, sourceDocument.FilePath),
+            sourceDocument.Id,
+            sourceText,
+            [new TextChange(classDeclaration.Span, updatedClass.ToFullString())],
+            null,
+            sourceDocument.FilePath);
+
+        return MoveTypeChangesResult.Ok([sourceChange, destinationChange]);
+    }
+
     private static RefactorPreviewResult CreatePreviewResult(
         string operation,
         string? symbolId,
@@ -502,6 +918,41 @@ public sealed class RefactorPreviewService(
             DiffPreview = BuildCompactDiff(changes, maxItems),
             RequiresApproval = true
         };
+    }
+
+    private void StorePreview(string repoRoot, RefactorPreviewResult result, IReadOnlyList<DocumentPreviewChanges> changes)
+    {
+        if (string.IsNullOrWhiteSpace(result.EditId) || string.IsNullOrWhiteSpace(result.SolutionId))
+        {
+            return;
+        }
+
+        var files = changes
+            .Where(change => change.Changes.Count > 0 && change.FilePath is not null)
+            .Select(change =>
+            {
+                var newText = change.OriginalText.WithChanges(change.Changes).ToString();
+                var originalText = change.OriginalText.ToString();
+                var originalHash = string.IsNullOrEmpty(originalText) && !File.Exists(change.FilePath!)
+                    ? null
+                    : WorkspaceEditCache.HashText(originalText);
+                return new CachedWorkspaceEditFile(
+                    change.File,
+                    change.FilePath!,
+                    originalHash,
+                    newText,
+                    change.Changes.Count);
+            })
+            .ToArray();
+
+        editCache.Store(new CachedWorkspaceEdit(
+            result.EditId,
+            repoRoot,
+            result.SolutionId,
+            result.Operation,
+            result.DiagnosticsBefore,
+            result.DiagnosticsAfter,
+            files));
     }
 
     private static string BuildCompactDiff(IReadOnlyList<DocumentPreviewChanges> changes, int maxItems)
@@ -553,6 +1004,35 @@ public sealed class RefactorPreviewService(
         if (symbol.Locations.Any(location => location.IsInSource && IsGeneratedPath(location.GetLineSpan().Path)))
         {
             reasons.Add("Symbol is declared in generated-looking source.");
+        }
+
+        if (symbol is INamedTypeSymbol { DeclaringSyntaxReferences.Length: > 0 } namedType)
+        {
+            var syntax = namedType.DeclaringSyntaxReferences
+                .Select(reference => reference.GetSyntax())
+                .FirstOrDefault();
+            if (syntax is BaseTypeDeclarationSyntax { Modifiers: var modifiers }
+                && modifiers.Any(SyntaxKind.PartialKeyword))
+            {
+                reasons.Add("Symbol is declared as partial.");
+            }
+        }
+
+        if (symbol.Name.EndsWith("Dto", StringComparison.Ordinal)
+            || symbol.ContainingNamespace?.ToDisplayString().Contains("Contract", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            reasons.Add("Symbol looks like a public contract or DTO candidate.");
+        }
+
+        if (changes.Any(change => change.File.Contains("Controller", StringComparison.OrdinalIgnoreCase)
+            || change.File.Contains("Endpoint", StringComparison.OrdinalIgnoreCase)))
+        {
+            reasons.Add("Change touches API route or endpoint-looking code.");
+        }
+
+        if (changes.Any(change => change.OriginalText.ToString().Contains($"\"{symbol.Name}\"", StringComparison.Ordinal)))
+        {
+            reasons.Add("Symbol name appears in string literals that could be reflection or serialization candidates.");
         }
 
         if (newDiagnosticDelta > 0)
@@ -668,7 +1148,7 @@ public sealed class RefactorPreviewService(
     {
         return Empty<TItem>(
             "unsupported_operation",
-            $"Operation '{operation}' is not implemented in the current Phase 4 preview slice.",
+            $"Operation '{operation}' is not supported by the current preview surface.",
             detailLevel);
     }
 

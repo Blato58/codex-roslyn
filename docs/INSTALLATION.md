@@ -99,8 +99,12 @@ cs_solution_select
 cs_symbol_at
 cs_find_references
 cs_diagnostics
+cs_diagnostics_summary
+cs_context_pack
 cs_refactor_preview
 ```
+
+The server also exposes advanced tools such as `cs_full_call_graph`, `cs_data_flow`, `cs_code_fix_preview`, and `cs_public_api_diff`, plus the mutating `cs_apply_workspace_edit`. These are disabled by the default plugin config. Use `plugin/config/roslyn.advanced-opt-in.config.toml` only when prompt-approved advanced/apply tools are intended.
 
 You can also verify the CLI outside Codex:
 

@@ -67,21 +67,25 @@ public sealed class PluginPackagingTests
     [InlineData("plugin", "skills", "dotnet-test-impact", "SKILL.md")]
     [InlineData("plugin", "config", "roslyn.config.toml")]
     [InlineData("plugin", "config", "roslyn.daemon.config.toml")]
+    [InlineData("plugin", "config", "roslyn.advanced-opt-in.config.toml")]
     [InlineData("plugin", "templates", "AGENTS.md")]
-    public void PhaseThreePluginFiles_Exist(params string[] pathParts)
+    public void PluginFiles_Exist(params string[] pathParts)
     {
         Assert.True(File.Exists(RepoPath(pathParts)), string.Join(Path.DirectorySeparatorChar, pathParts));
     }
 
     [Fact]
-    public void ConfigSample_EnablesOnlyReadOnlyPhaseZeroToTwoTools()
+    public void ConfigSample_EnablesOnlyReadOnlyDefaultTools()
     {
         var config = File.ReadAllText(RepoPath("plugin", "config", "roslyn.config.toml"));
 
         Assert.Contains("cs_diagnostics", config);
+        Assert.Contains("cs_diagnostics_summary", config);
+        Assert.Contains("cs_context_pack", config);
         Assert.Contains("cs_change_impact", config);
         Assert.Contains("cs_test_impact", config);
         Assert.Contains("cs_refactor_preview", config);
+        Assert.DoesNotContain("cs_full_call_graph", config);
         Assert.DoesNotContain("cs_apply_workspace_edit", config);
     }
 
@@ -93,6 +97,17 @@ public sealed class PluginPackagingTests
         Assert.Contains("http://127.0.0.1:38777/mcp", config);
         Assert.Contains("cs_refactor_preview", config);
         Assert.DoesNotContain("cs_apply_workspace_edit", config);
+    }
+
+    [Fact]
+    public void AdvancedConfig_RequiresPromptApprovalAndIncludesApplyTool()
+    {
+        var config = File.ReadAllText(RepoPath("plugin", "config", "roslyn.advanced-opt-in.config.toml"));
+
+        Assert.Contains("default_tools_approval_mode = \"prompt\"", config);
+        Assert.Contains("cs_apply_workspace_edit", config);
+        Assert.Contains("cs_full_call_graph", config);
+        Assert.Contains("cs_code_fix_preview", config);
     }
 
     private static string RepoPath(params string[] pathParts)

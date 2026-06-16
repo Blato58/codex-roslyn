@@ -14,6 +14,7 @@ When working in a C# or .NET repository:
 - Use `cs_symbol_at` for file/line/column questions.
 - Use `cs_find_references`, `cs_find_implementations`, `cs_type_hierarchy`, or `cs_callers` instead of broad text search.
 - Use `cs_diagnostics` for compiler diagnostics in the selected solution.
+- Use `cs_diagnostics_summary` and `cs_context_pack` when a compact planning summary is enough.
 - Request `detailLevel: "tiny"` or `"normal"` first.
 - Do not request source text unless an edit requires exact surrounding code.
 - Do not load every solution unless the user explicitly asks for all-solution analysis.

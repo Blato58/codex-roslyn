@@ -38,7 +38,7 @@ public sealed class RepoIdentityAndCacheTests
         Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
         var cacheRoot = CreateTempDirectory();
         var services = new ServiceCollection();
-        services.AddCodexRoslynPhaseZero();
+        services.AddCodexRoslynServices();
         services.AddSingleton(new IndexPathProvider(cacheRoot));
         using var provider = services.BuildServiceProvider();
         var indexService = provider.GetRequiredService<ColdIndexService>();

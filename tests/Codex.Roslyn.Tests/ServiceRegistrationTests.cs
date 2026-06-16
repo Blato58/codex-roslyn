@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Codex.Roslyn.Tests;
 
-public sealed class PhaseZeroServiceTests
+public sealed class ServiceRegistrationTests
 {
     [Fact]
     public void RepoOverview_ReturnsDiscoveredSolutionsAndColdWorkspace()
@@ -40,7 +40,7 @@ public sealed class PhaseZeroServiceTests
     private static ServiceProvider CreateServices()
     {
         var services = new ServiceCollection();
-        services.AddCodexRoslynPhaseZero();
+        services.AddCodexRoslynServices();
         services.AddSingleton(new IndexPathProvider(CreateTempDirectory()));
         return services.BuildServiceProvider();
     }

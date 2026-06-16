@@ -1,0 +1,17 @@
+[plugins."dotnet-semantic-tools".mcp_servers.roslyn]
+enabled = true
+default_tools_approval_mode = "prompt"
+enabled_tools = [
+  "cs_context_pack",
+  "cs_diagnostics_summary",
+  "cs_full_call_graph",
+  "cs_data_flow",
+  "cs_control_flow",
+  "cs_operation_tree",
+  "cs_run_analyzers",
+  "cs_code_fix_preview",
+  "cs_public_api_diff",
+  "cs_dead_code_candidates",
+  "cs_generated_code_search",
+  "cs_apply_workspace_edit"
+]

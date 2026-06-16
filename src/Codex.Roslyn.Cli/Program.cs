@@ -154,7 +154,7 @@ internal static class CliProgram
     private static ServiceProvider CreateServices()
     {
         var services = new ServiceCollection();
-        services.AddCodexRoslynPhaseZero();
+        services.AddCodexRoslynServices();
         return services.BuildServiceProvider();
     }
 
