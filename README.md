@@ -108,6 +108,8 @@ Tool methods live in `src/Codex.Roslyn.Mcp/Tools/RepoTools.cs`. Business logic b
 
 ## Plugin Usage
 
+For the full setup flow, including installing the required `dotnet-roslyn-mcp` .NET tool, see [docs/INSTALLATION.md](docs/INSTALLATION.md).
+
 The plugin manifest is `plugin/.codex-plugin/plugin.json`. The bundled MCP config in `plugin/.mcp.json` expects an installed `dotnet-roslyn-mcp` command and starts:
 
 ```text
@@ -151,4 +153,4 @@ Generated files ending in `.g.cs`, `.generated.cs`, or `.designer.cs` are exclud
 - Keep repo-relative paths normalized to forward slashes in indexes and responses.
 - Do not auto-run restore or build from MCP tool handling; return actionable status instead.
 - Update focused xUnit tests when changing scanner, index, semantic query, tool contract, or transport behavior.
-- Treat `SPECIFICATION.md` and `RESEARCH.md` as design/reference documents. Verify current behavior against source before documenting it as implemented.
+- Treat `docs/SPECIFICATION.md` and `docs/RESEARCH.md` as design/reference documents. Verify current behavior against source before documenting it as implemented.

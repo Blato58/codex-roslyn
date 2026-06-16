@@ -117,8 +117,8 @@ public sealed partial class BashGuardService
         return !normalized.Contains("--files", StringComparison.OrdinalIgnoreCase)
             && !normalized.Contains("--glob", StringComparison.OrdinalIgnoreCase)
             && !normalized.Contains("-g", StringComparison.OrdinalIgnoreCase)
-            && !normalized.Contains("SPECIFICATION.md", StringComparison.OrdinalIgnoreCase)
-            && !normalized.Contains("RESEARCH.md", StringComparison.OrdinalIgnoreCase);
+            && !normalized.Contains("docs/SPECIFICATION.md", StringComparison.OrdinalIgnoreCase)
+            && !normalized.Contains("docs/RESEARCH.md", StringComparison.OrdinalIgnoreCase);
     }
 
     [GeneratedRegex(@"cat\s+\$\(\s*find\s+\.?\s+.*-name\s+['""]?\*\.cs['""]?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]

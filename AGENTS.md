@@ -41,7 +41,7 @@
 - Warm semantic tools load Roslyn only after solution selection or unambiguous scope. Preserve `cs_solution_select` and ambiguity responses for multi-solution repos.
 - `WorkspaceManager` currently keeps a small warm LRU and loads Debug configuration. Dispose stale workspaces when the cold index becomes stale.
 - `IndexDatabase` owns schema changes. Update tests around status, search, outline, and semantic persistence when changing schema or query behavior.
-- `SPECIFICATION.md` and `RESEARCH.md` describe intended direction, including future HTTP daemon/refactor phases. Do not present future-mode behavior as implemented.
+- `docs/SPECIFICATION.md` and `docs/RESEARCH.md` describe intended direction, including future HTTP daemon/refactor phases. Do not present future-mode behavior as implemented.
 
 ## Testing Guidelines
 
