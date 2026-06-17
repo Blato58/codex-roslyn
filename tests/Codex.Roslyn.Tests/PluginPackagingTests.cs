@@ -5,7 +5,7 @@ namespace Codex.Roslyn.Tests;
 public sealed class PluginPackagingTests
 {
     [Fact]
-    public void PluginManifest_ReferencesSkillsMcpAndHooks()
+    public void PluginManifest_ReferencesSkillsAndMcp()
     {
         using var document = JsonDocument.Parse(File.ReadAllText(RepoPath("plugin", ".codex-plugin", "plugin.json")));
         var root = document.RootElement;
@@ -13,7 +13,14 @@ public sealed class PluginPackagingTests
         Assert.Equal("dotnet-semantic-tools", root.GetProperty("name").GetString());
         Assert.Equal("./skills/", root.GetProperty("skills").GetString());
         Assert.Equal("./.mcp.json", root.GetProperty("mcpServers").GetString());
-        Assert.Equal("./hooks/hooks.json", root.GetProperty("hooks").GetString());
+        Assert.False(root.TryGetProperty("hooks", out _));
+
+        var author = root.GetProperty("author");
+        Assert.Equal("CodexRoslyn contributors", author.GetProperty("name").GetString());
+
+        var pluginInterface = root.GetProperty("interface");
+        Assert.Equal("Dotnet Semantic Tools", pluginInterface.GetProperty("displayName").GetString());
+        Assert.Equal("Productivity", pluginInterface.GetProperty("category").GetString());
     }
 
     [Fact]
@@ -44,6 +51,7 @@ public sealed class PluginPackagingTests
     {
         using var document = JsonDocument.Parse(File.ReadAllText(RepoPath("plugin", ".mcp.json")));
         var roslynServer = document.RootElement
+            .GetProperty("mcpServers")
             .GetProperty("roslyn");
         var args = roslynServer
             .GetProperty("args")
@@ -104,6 +112,8 @@ public sealed class PluginPackagingTests
         var config = File.ReadAllText(RepoPath("plugin", "config", "roslyn.advanced-opt-in.config.toml"));
 
         Assert.Contains("default_tools_approval_mode = \"prompt\"", config);
+        Assert.Contains("--enable-apply", config);
+        Assert.Contains("CODEX_ROSLYN_ENABLE_APPLY=1", config);
         Assert.Contains("cs_apply_workspace_edit", config);
         Assert.Contains("cs_full_call_graph", config);
         Assert.Contains("cs_code_fix_preview", config);

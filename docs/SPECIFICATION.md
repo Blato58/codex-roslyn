@@ -1192,12 +1192,25 @@ profile: full
 ```json
 {
   "name": "dotnet-semantic-tools",
-  "version": "0.1.0",
+  "version": "0.1.0-preview.20260617+codex.20260617002835",
   "description": "Roslyn semantic navigation, diagnostics, impact analysis, and safe refactor previews for C#/.NET repositories.",
+  "author": {
+    "name": "CodexRoslyn contributors",
+    "url": "https://github.com/Blato58/codex-roslyn"
+  },
+  "homepage": "https://github.com/Blato58/codex-roslyn",
+  "repository": "https://github.com/Blato58/codex-roslyn",
+  "license": "MIT",
+  "keywords": ["codex", "mcp", "roslyn", "csharp", "dotnet", "semantic-navigation", "refactoring"],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
-  "hooks": "./hooks/hooks.json",
   "interface": {
+    "displayName": "Dotnet Semantic Tools",
+    "shortDescription": "Roslyn semantic tools for C# and .NET repositories.",
+    "longDescription": "Adds local-first Roslyn MCP tools for repository overview, symbol navigation, references, diagnostics, impact analysis, context packing, and safe refactor previews.",
+    "developerName": "CodexRoslyn contributors",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Read"],
     "defaultPrompt": [
       "Use Roslyn semantic tools for C#/.NET navigation, references, diagnostics, impact analysis, and refactor planning before raw text search.",
       "Prefer compact semantic summaries first. Request source only when an edit requires it."
@@ -1206,15 +1219,28 @@ profile: full
 }
 ```
 
-Codex plugins require `.codex-plugin/plugin.json` and can point to `skills`, `hooks`, apps, and `.mcp.json` MCP server definitions. ([OpenAI Developers][12])
+Codex plugins require `.codex-plugin/plugin.json` and can point to `skills`, apps, and `.mcp.json` MCP server definitions. The bundled plugin also ships `hooks/hooks.json` for local hook-capable installs. ([OpenAI Developers][12])
 
 ### `.mcp.json`
 
 ```json
 {
-  "roslyn": {
-    "command": "dotnet-roslyn-mcp",
-    "args": ["serve", "--stdio"]
+  "mcpServers": {
+    "roslyn": {
+      "command": "powershell",
+      "args": [
+        "-NoLogo",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "./scripts/roslyn-mcp.ps1",
+        "serve",
+        "--stdio"
+      ],
+      "cwd": ".",
+      "startup_timeout_sec": 120
+    }
   }
 }
 ```

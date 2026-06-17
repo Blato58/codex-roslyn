@@ -321,6 +321,20 @@ public sealed class IndexDatabase
         return results;
     }
 
+    public bool ContainsFile(string indexPath, string file)
+    {
+        if (!File.Exists(indexPath))
+        {
+            return false;
+        }
+
+        using var connection = Open(indexPath);
+        using var command = connection.CreateCommand();
+        command.CommandText = "select 1 from file where relative_path = $file limit 1;";
+        command.Parameters.AddWithValue("$file", file.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/'));
+        return command.ExecuteScalar() is not null;
+    }
+
     public void RecordSemanticSymbol(string indexPath, RepoIdentity identity, SemanticSymbolResult symbol)
     {
         if (!File.Exists(indexPath))

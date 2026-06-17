@@ -39,6 +39,30 @@ public sealed class SemanticWorkspaceIntegrationTests
     }
 
     [Fact]
+    public async Task SymbolAt_AcceptsAbsoluteRepoPathAndRejectsOutsidePath()
+    {
+        var repo = CreateSemanticRepo();
+        using var services = CreateServices(out _);
+        services.GetRequiredService<ColdIndexService>().Build(repo);
+        var solutionId = services.GetRequiredService<SolutionDiscoveryService>().Discover(repo).Single().SolutionId;
+        services.GetRequiredService<SolutionSelectionService>().Select(solutionId, new ToolScope { RepoRoot = repo });
+        var semantic = services.GetRequiredService<SemanticQueryService>();
+        var sourcePath = Path.Combine(repo, "src", "SampleLib", "CustomerService.cs");
+        var position = FindPosition(sourcePath, "CustomerService");
+        var outsidePath = Path.Combine(CreateTempDirectory(), "CustomerService.cs");
+        File.WriteAllText(outsidePath, File.ReadAllText(sourcePath));
+
+        var relative = await semantic.SymbolAtAsync("src/SampleLib/CustomerService.cs", position.Line, position.Column, new ToolScope { RepoRoot = repo });
+        var absolute = await semantic.SymbolAtAsync(sourcePath, position.Line, position.Column, new ToolScope { RepoRoot = repo });
+        var outside = await semantic.SymbolAtAsync(outsidePath, position.Line, position.Column, new ToolScope { RepoRoot = repo });
+
+        Assert.Equal("ok", relative.ResultKind);
+        Assert.Equal("ok", absolute.ResultKind);
+        Assert.Equal(relative.Items.Single().DisplayName, absolute.Items.Single().DisplayName);
+        Assert.Equal("file_not_found", outside.ResultKind);
+    }
+
+    [Fact]
     public async Task RefactorPreview_RenameReturnsCompactDiffWithoutMutatingFiles()
     {
         var repo = CreateSemanticRepo();
@@ -146,7 +170,7 @@ public sealed class SemanticWorkspaceIntegrationTests
     public async Task ApplyWorkspaceEdit_AppliesCachedRenameAndRejectsReuse()
     {
         var repo = CreateSemanticRepo();
-        using var services = CreateServices(out _);
+        using var services = CreateServices(out _, enableApply: true);
         services.GetRequiredService<ColdIndexService>().Build(repo);
         var solutionId = services.GetRequiredService<SolutionDiscoveryService>().Discover(repo).Single().SolutionId;
         services.GetRequiredService<SolutionSelectionService>().Select(solutionId, new ToolScope { RepoRoot = repo });
@@ -169,7 +193,7 @@ public sealed class SemanticWorkspaceIntegrationTests
     public async Task ApplyWorkspaceEdit_RejectsStalePreview()
     {
         var repo = CreateSemanticRepo();
-        using var services = CreateServices(out _);
+        using var services = CreateServices(out _, enableApply: true);
         services.GetRequiredService<ColdIndexService>().Build(repo);
         var solutionId = services.GetRequiredService<SolutionDiscoveryService>().Discover(repo).Single().SolutionId;
         services.GetRequiredService<SolutionSelectionService>().Select(solutionId, new ToolScope { RepoRoot = repo });
@@ -188,10 +212,32 @@ public sealed class SemanticWorkspaceIntegrationTests
     }
 
     [Fact]
-    public async Task RefactorPreview_ChangeNamespaceAndExtractInterfaceReturnApplyablePreviews()
+    public async Task ApplyWorkspaceEdit_IsDisabledByDefaultAndDoesNotMutate()
     {
         var repo = CreateSemanticRepo();
         using var services = CreateServices(out _);
+        services.GetRequiredService<ColdIndexService>().Build(repo);
+        var solutionId = services.GetRequiredService<SolutionDiscoveryService>().Discover(repo).Single().SolutionId;
+        services.GetRequiredService<SolutionSelectionService>().Select(solutionId, new ToolScope { RepoRoot = repo });
+        var semantic = services.GetRequiredService<SemanticQueryService>();
+        var refactors = services.GetRequiredService<RefactorPreviewService>();
+        var sourcePath = Path.Combine(repo, "src", "SampleLib", "CustomerService.cs");
+        var methodPosition = FindPosition(sourcePath, "GetAsync");
+        var methodSymbol = await semantic.SymbolAtAsync("src/SampleLib/CustomerService.cs", methodPosition.Line, methodPosition.Column, new ToolScope { RepoRoot = repo });
+        var preview = await refactors.PreviewAsync("rename", methodSymbol.Items.Single().SymbolId, "GetCustomerAsync", scope: new ToolScope { RepoRoot = repo });
+
+        var applied = await refactors.ApplyWorkspaceEditAsync(preview.Items.Single().EditId, new ToolScope { RepoRoot = repo });
+
+        Assert.Equal("disabled", applied.ResultKind);
+        Assert.Contains("GetAsync", File.ReadAllText(sourcePath));
+        Assert.DoesNotContain("GetCustomerAsync", File.ReadAllText(sourcePath));
+    }
+
+    [Fact]
+    public async Task RefactorPreview_ChangeNamespaceAndExtractInterfaceReturnApplyablePreviews()
+    {
+        var repo = CreateSemanticRepo();
+        using var services = CreateServices(out _, enableApply: true);
         services.GetRequiredService<ColdIndexService>().Build(repo);
         var solutionId = services.GetRequiredService<SolutionDiscoveryService>().Discover(repo).Single().SolutionId;
         services.GetRequiredService<SolutionSelectionService>().Select(solutionId, new ToolScope { RepoRoot = repo });
@@ -246,7 +292,7 @@ public sealed class SemanticWorkspaceIntegrationTests
                 public Demo.MultiTarget Create() => target;
             }
             """);
-        using var services = CreateServices(out _);
+        using var services = CreateServices(out _, enableApply: true);
         services.GetRequiredService<ColdIndexService>().Build(repo);
         var solutionId = services.GetRequiredService<SolutionDiscoveryService>().Discover(repo).Single().SolutionId;
         services.GetRequiredService<SolutionSelectionService>().Select(solutionId, new ToolScope { RepoRoot = repo });
@@ -267,6 +313,55 @@ public sealed class SemanticWorkspaceIntegrationTests
         Assert.Contains("namespace Demo.Renamed", targetText);
         Assert.Contains("using Demo.Renamed;", consumerText);
         Assert.Contains("Demo.Renamed.MultiTarget", consumerText);
+    }
+
+    [Fact]
+    public async Task ImpactTools_FilterGeneratedAndExternalChangedFiles()
+    {
+        var repo = CreateSemanticRepo(includeTestProject: true);
+        Directory.CreateDirectory(Path.Combine(repo, "obj", "Debug"));
+        var generatedPath = Path.Combine(repo, "obj", "Debug", "Generated.g.cs");
+        File.WriteAllText(generatedPath, "public class Generated { }");
+        var externalPath = Path.Combine(CreateTempDirectory(), ".nuget", "packages", "microsoft.net.test.sdk", "Microsoft.NET.Test.Sdk.Program.cs");
+        Directory.CreateDirectory(Path.GetDirectoryName(externalPath)!);
+        File.WriteAllText(externalPath, "public class Program { }");
+        using var services = CreateServices(out _);
+        services.GetRequiredService<ColdIndexService>().Build(repo);
+        var solutionId = services.GetRequiredService<SolutionDiscoveryService>().Discover(repo).Single().SolutionId;
+        services.GetRequiredService<SolutionSelectionService>().Select(solutionId, new ToolScope { RepoRoot = repo });
+        var impactService = services.GetRequiredService<ImpactAnalysisService>();
+
+        var impact = await impactService.ChangeImpactAsync(
+            changedFiles:
+            [
+                "src/SampleLib/CustomerService.cs",
+                generatedPath,
+                externalPath
+            ],
+            scope: new ToolScope { RepoRoot = repo });
+        var testImpact = await impactService.TestImpactAsync(
+            changedFiles:
+            [
+                "src/SampleLib/CustomerService.cs",
+                generatedPath,
+                externalPath
+            ],
+            scope: new ToolScope { RepoRoot = repo });
+
+        Assert.Equal("ok", impact.ResultKind);
+        Assert.Equal("ok", testImpact.ResultKind);
+        Assert.All(impact.Items.SelectMany(item => item.Files), file =>
+        {
+            Assert.DoesNotContain("obj/", file, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(".nuget", file, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Microsoft.NET.Test.Sdk.Program.cs", file, StringComparison.OrdinalIgnoreCase);
+        });
+        Assert.All(testImpact.Items.SelectMany(item => item.Files), file =>
+        {
+            Assert.DoesNotContain("obj/", file, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(".nuget", file, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Microsoft.NET.Test.Sdk.Program.cs", file, StringComparison.OrdinalIgnoreCase);
+        });
     }
 
     [Fact]
@@ -309,6 +404,16 @@ public sealed class SemanticWorkspaceIntegrationTests
                 public int ReadUsed() => usedField;
             }
             """);
+        File.WriteAllText(
+            Path.Combine(repo, "src", "SampleLib", "Generated.g.cs"),
+            """
+            namespace Demo;
+
+            public class GeneratedHolder
+            {
+                private int generatedUnusedField;
+            }
+            """);
         using var services = CreateServices(out _);
         services.GetRequiredService<ColdIndexService>().Build(repo);
         var solutionId = services.GetRequiredService<SolutionDiscoveryService>().Discover(repo).Single().SolutionId;
@@ -320,6 +425,7 @@ public sealed class SemanticWorkspaceIntegrationTests
         Assert.Equal("ok", candidates.ResultKind);
         Assert.Contains(candidates.Items, item => item.DisplayName.Contains("unusedField", StringComparison.Ordinal));
         Assert.DoesNotContain(candidates.Items, item => item.DisplayName.EndsWith(".usedField", StringComparison.Ordinal));
+        Assert.DoesNotContain(candidates.Items, item => item.DisplayName.Contains("generatedUnusedField", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -372,6 +478,7 @@ public sealed class SemanticWorkspaceIntegrationTests
         var result = advanced.GeneratedCodeSearch("", scope: new ToolScope { RepoRoot = repo });
 
         Assert.Equal("ok", result.ResultKind);
+        Assert.Equal("bypass", result.CacheStatus.Index);
         Assert.Single(result.Items);
         Assert.Equal("src/Included.g.cs", result.Items.Single().File);
     }
@@ -418,12 +525,13 @@ public sealed class SemanticWorkspaceIntegrationTests
         Assert.Equal("ambiguous_solution", result.ResultKind);
     }
 
-    private static ServiceProvider CreateServices(out string cacheRoot)
+    private static ServiceProvider CreateServices(out string cacheRoot, bool enableApply = false)
     {
         cacheRoot = CreateTempDirectory();
         var services = new ServiceCollection();
         services.AddCodexRoslynServices();
         services.AddSingleton(new IndexPathProvider(cacheRoot));
+        services.AddSingleton(new WorkspaceEditOptions(enableApply));
         return services.BuildServiceProvider();
     }
 

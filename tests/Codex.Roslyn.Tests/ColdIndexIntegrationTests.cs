@@ -17,6 +17,7 @@ public sealed class ColdIndexIntegrationTests
         var overview = services.GetRequiredService<RepoOverviewService>().GetOverview(new ToolScope { RepoRoot = repo });
         var search = services.GetRequiredService<SymbolSearchService>().Search("CustomerService", scope: new ToolScope { RepoRoot = repo });
         var outline = services.GetRequiredService<DocumentOutlineService>().GetOutline("src/CustomerService.cs", new ToolScope { RepoRoot = repo });
+        var absoluteOutline = services.GetRequiredService<DocumentOutlineService>().GetOutline(Path.Combine(repo, "src", "CustomerService.cs"), new ToolScope { RepoRoot = repo });
 
         Assert.True(File.Exists(build.CachePath));
         Assert.StartsWith(cacheRoot, build.CachePath, StringComparison.OrdinalIgnoreCase);
@@ -24,6 +25,22 @@ public sealed class ColdIndexIntegrationTests
         Assert.Equal("hit", overview.CacheStatus.Index);
         Assert.Contains(search.Items, item => item.Name == "CustomerService" && item.Confidence == "syntax_only");
         Assert.Contains(outline.Items, item => item.Name == "GetAsync" && item.Kind == "method");
+        Assert.Contains(absoluteOutline.Items, item => item.Name == "GetAsync" && item.Kind == "method");
+    }
+
+    [Fact]
+    public void DocumentOutline_ReturnsFileNotFoundForOutsideRepoAbsolutePath()
+    {
+        var repo = CreateSampleRepo();
+        using var services = CreateServices(out _);
+        services.GetRequiredService<ColdIndexService>().Build(repo);
+        var outsideFile = Path.Combine(CreateTempDirectory(), "CustomerService.cs");
+        File.WriteAllText(outsideFile, "public class CustomerService { }");
+
+        var outline = services.GetRequiredService<DocumentOutlineService>().GetOutline(outsideFile, new ToolScope { RepoRoot = repo });
+
+        Assert.Equal("file_not_found", outline.ResultKind);
+        Assert.Empty(outline.Items);
     }
 
     [Fact]

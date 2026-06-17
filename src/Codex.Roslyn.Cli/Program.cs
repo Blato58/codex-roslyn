@@ -189,8 +189,8 @@ internal static class CliProgram
     {
         Console.WriteLine("""
 dotnet-roslyn-mcp commands:
-  serve --stdio
-  serve --http --port 38777
+  serve --stdio [--enable-apply]
+  serve --http --port 38777 [--enable-apply]
   index --repo <path>
   status --repo <path>
   doctor --repo <path>

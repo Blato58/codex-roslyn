@@ -12,7 +12,8 @@ public sealed class ImpactAnalysisService(
     SolutionSelectionService solutionSelectionService,
     WorkspaceManager workspaceManager,
     ColdIndexService coldIndexService,
-    SemanticSymbolCache symbolCache)
+    SemanticSymbolCache symbolCache,
+    RepoPathService repoPathService)
 {
     public async Task<ToolResponse<ChangeImpactResult>> ChangeImpactAsync(
         IReadOnlyList<string>? symbolIds = null,
@@ -236,7 +237,7 @@ public sealed class ImpactAnalysisService(
         var fileReasons = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var changedFile in changedFiles ?? [])
         {
-            AddFile(NormalizePath(changedFile), "File was supplied as changed input.");
+            AddFile(changedFile, "File was supplied as changed input.");
         }
 
         foreach (var symbolId in symbolIds ?? [])
@@ -251,7 +252,7 @@ public sealed class ImpactAnalysisService(
             {
                 if (!string.IsNullOrWhiteSpace(syntaxReference.SyntaxTree.FilePath))
                 {
-                    AddFile(RelativePath(loaded.RepoRoot, syntaxReference.SyntaxTree.FilePath), $"Declaration for semantic symbol {symbolDisplay}.");
+                    AddFile(syntaxReference.SyntaxTree.FilePath, $"Declaration for semantic symbol {symbolDisplay}.");
                 }
             }
 
@@ -299,13 +300,17 @@ public sealed class ImpactAnalysisService(
             var path = location.SourceTree?.FilePath ?? location.GetLineSpan().Path;
             if (!string.IsNullOrWhiteSpace(path))
             {
-                AddFile(RelativePath(loaded.RepoRoot, path), reason);
+                AddFile(path, reason);
             }
         }
 
         void AddFile(string file, string reason)
         {
-            var normalized = NormalizePath(file);
+            if (!repoPathService.TryNormalizeDocumentPath(loaded.RepoRoot, file, out var normalized))
+            {
+                return;
+            }
+
             impactedFiles.Add(normalized);
             if (!fileReasons.TryGetValue(normalized, out var reasons))
             {
@@ -320,7 +325,7 @@ public sealed class ImpactAnalysisService(
         }
     }
 
-    private static ProjectImpact BuildProjectImpact(
+    private ProjectImpact BuildProjectImpact(
         Project project,
         string repoRoot,
         IReadOnlySet<string> impactedFiles,
@@ -389,7 +394,7 @@ public sealed class ImpactAnalysisService(
         return [command];
     }
 
-    private static async Task<IReadOnlyList<string>> FindTestClassNamesAsync(
+    private async Task<IReadOnlyList<string>> FindTestClassNamesAsync(
         Project project,
         string repoRoot,
         IReadOnlyList<string> directTestFiles,
@@ -408,7 +413,11 @@ public sealed class ImpactAnalysisService(
                 continue;
             }
 
-            var relative = RelativePath(repoRoot, document.FilePath);
+            if (!repoPathService.TryNormalizeDocumentPath(repoRoot, document.FilePath, out var relative))
+            {
+                continue;
+            }
+
             if (!directTestFiles.Contains(relative, StringComparer.OrdinalIgnoreCase))
             {
                 continue;
@@ -442,7 +451,7 @@ public sealed class ImpactAnalysisService(
             : command;
     }
 
-    private static bool IsTestProject(Project project, string repoRoot)
+    private bool IsTestProject(Project project, string repoRoot)
     {
         if (project.Name.Contains("test", StringComparison.OrdinalIgnoreCase)
             || ProjectFile(repoRoot, project)?.Contains("test", StringComparison.OrdinalIgnoreCase) == true)
@@ -475,13 +484,15 @@ public sealed class ImpactAnalysisService(
             && Path.GetDirectoryName(testProject.FilePath)?.Contains(Path.GetFileNameWithoutExtension(sourceProject.FilePath), StringComparison.OrdinalIgnoreCase) == true;
     }
 
-    private static IEnumerable<string> ProjectFiles(Project project, string repoRoot)
+    private IEnumerable<string> ProjectFiles(Project project, string repoRoot)
     {
-        return project.Documents
-            .Select(document => document.FilePath)
-            .Where(path => path is not null)
-            .Cast<string>()
-            .Select(path => RelativePath(repoRoot, path));
+        foreach (var document in project.Documents)
+        {
+            if (repoPathService.TryNormalizeDocumentPath(repoRoot, document.FilePath, out var relative))
+            {
+                yield return relative;
+            }
+        }
     }
 
     private static string NormalizeTestName(string value)
@@ -506,19 +517,12 @@ public sealed class ImpactAnalysisService(
         };
     }
 
-    private static string? ProjectFile(string repoRoot, Project project)
+    private string? ProjectFile(string repoRoot, Project project)
     {
-        return project.FilePath is null ? null : RelativePath(repoRoot, project.FilePath);
-    }
-
-    private static string RelativePath(string repoRoot, string path)
-    {
-        return NormalizePath(Path.GetRelativePath(repoRoot, path));
-    }
-
-    private static string NormalizePath(string path)
-    {
-        return path.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');
+        return project.FilePath is not null
+            && repoPathService.TryNormalizeRepoRelativePath(repoRoot, project.FilePath, out var relative, out _)
+            ? relative
+            : null;
     }
 
     private sealed record ImpactAnalysis(

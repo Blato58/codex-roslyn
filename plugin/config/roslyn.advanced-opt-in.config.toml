@@ -1,6 +1,8 @@
 [plugins."dotnet-semantic-tools".mcp_servers.roslyn]
 enabled = true
 default_tools_approval_mode = "prompt"
+# cs_apply_workspace_edit is still server-disabled unless dotnet-roslyn-mcp is
+# started with --enable-apply or CODEX_ROSLYN_ENABLE_APPLY=1.
 enabled_tools = [
   "cs_context_pack",
   "cs_diagnostics_summary",

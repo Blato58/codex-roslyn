@@ -1,11 +1,35 @@
 {
   "name": "dotnet-semantic-tools",
-  "version": "0.1.0-preview.20260617+codex.20260616233509",
+  "version": "0.1.0-preview.20260617+codex.20260617002835",
   "description": "Roslyn semantic navigation, diagnostics, impact analysis, and safe refactor previews for C#/.NET repositories.",
+  "author": {
+    "name": "CodexRoslyn contributors",
+    "url": "https://github.com/Blato58/codex-roslyn"
+  },
+  "homepage": "https://github.com/Blato58/codex-roslyn",
+  "repository": "https://github.com/Blato58/codex-roslyn",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "mcp",
+    "roslyn",
+    "csharp",
+    "dotnet",
+    "semantic-navigation",
+    "refactoring"
+  ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
-  "hooks": "./hooks/hooks.json",
   "interface": {
+    "displayName": "Dotnet Semantic Tools",
+    "shortDescription": "Roslyn semantic tools for C# and .NET repositories.",
+    "longDescription": "Adds local-first Roslyn MCP tools for repository overview, symbol navigation, references, diagnostics, impact analysis, context packing, and safe refactor previews.",
+    "developerName": "CodexRoslyn contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read"
+    ],
     "defaultPrompt": [
       "Use Roslyn semantic tools for C#/.NET navigation, references, diagnostics, impact analysis, and refactor planning before raw text search.",
       "Prefer compact semantic summaries first. Request source only when an edit requires it."

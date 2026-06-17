@@ -21,6 +21,7 @@ public static class McpServerRunner
         });
 
         builder.Services.AddCodexRoslynServices();
+        builder.Services.AddSingleton(WorkspaceEditOptions.FromEnvironmentAndArgs(args));
         builder.Services.AddHostedService<ColdIndexWatcher>();
         builder.Services
             .AddMcpServer(options =>
@@ -50,6 +51,7 @@ public static class McpServerRunner
         });
 
         builder.Services.AddCodexRoslynServices();
+        builder.Services.AddSingleton(WorkspaceEditOptions.FromEnvironmentAndArgs(args));
         builder.Services.AddHostedService<ColdIndexWatcher>();
         builder.Services
             .AddMcpServer(serverOptions =>

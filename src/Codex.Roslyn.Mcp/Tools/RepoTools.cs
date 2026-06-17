@@ -189,7 +189,7 @@ public sealed class RepoTools(
     }
 
     [McpServerTool]
-    [Description("Apply a cached workspace edit produced by a preview tool in this server process. Disabled by default in plugin config.")]
+    [Description("Apply a cached workspace edit produced by a preview tool in this server process. Mutating and server-disabled unless --enable-apply or CODEX_ROSLYN_ENABLE_APPLY=1 is set.")]
     public Task<ToolResponse<WorkspaceEditApplyResult>> cs_apply_workspace_edit(
         string editId,
         ToolScope? scope = null,
@@ -301,7 +301,7 @@ public sealed class RepoTools(
     }
 
     [McpServerTool]
-    [Description("Return compiler diagnostics while analyzer execution remains opt-in. Disabled by default.")]
+    [Description("Return compiler diagnostics only; analyzer execution is not run by this partial tool. Disabled by default.")]
     public Task<ToolResponse<SemanticDiagnosticResult>> cs_run_analyzers(
         ToolScope? scope = null,
         string? path = null,
@@ -313,7 +313,7 @@ public sealed class RepoTools(
     }
 
     [McpServerTool]
-    [Description("Return diagnostic-backed code-fix preview candidates without applying changes. Disabled by default.")]
+    [Description("Return diagnostic candidates only, not applyable code-fix workspace edits. Disabled by default.")]
     public Task<ToolResponse<CodeFixPreviewResult>> cs_code_fix_preview(
         string? diagnosticId = null,
         string? file = null,
@@ -325,7 +325,7 @@ public sealed class RepoTools(
     }
 
     [McpServerTool]
-    [Description("Return current public API inventory for the selected solution. Disabled by default.")]
+    [Description("Return current public API inventory unless a baseline comparison is configured. Disabled by default.")]
     public Task<ToolResponse<PublicApiDiffResult>> cs_public_api_diff(
         ToolScope? scope = null,
         string detailLevel = "normal",
