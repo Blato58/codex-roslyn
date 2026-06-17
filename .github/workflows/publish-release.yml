@@ -16,9 +16,14 @@ on:
         required: true
         type: boolean
         default: true
+      nuget_owner:
+        description: "NuGet package owner for trusted publishing"
+        required: true
+        default: "Blato58"
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   publish:
@@ -107,20 +112,29 @@ jobs:
             --repo "${{ github.repository }}" `
             --clobber
 
-      - name: Require NuGet API key
-        if: inputs.publish_nuget
-        shell: pwsh
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:NUGET_API_KEY)) {
-            throw "Repository secret NUGET_API_KEY is required to publish to nuget.org."
-          }
+      - name: NuGet trusted publishing login
+        if: inputs.publish_nuget && env.NUGET_API_KEY == ''
+        uses: NuGet/login@v1
+        id: nuget_login
+        with:
+          user: ${{ inputs.nuget_owner }}
 
       - name: Push package to nuget.org
         if: inputs.publish_nuget
         shell: pwsh
+        env:
+          TRUSTED_PUBLISHING_API_KEY: ${{ steps.nuget_login.outputs.token }}
         run: >
+          $apiKey = if ([string]::IsNullOrWhiteSpace($env:NUGET_API_KEY)) {
+            $env:TRUSTED_PUBLISHING_API_KEY
+          } else {
+            $env:NUGET_API_KEY
+          };
+          if ([string]::IsNullOrWhiteSpace($apiKey)) {
+            throw "NuGet publishing requires either repository secret NUGET_API_KEY or a nuget.org trusted publishing policy for owner '${{ inputs.nuget_owner }}', repository '${{ github.repository }}', and workflow file 'publish-release.yml'."
+          };
           dotnet nuget push
           (Join-Path $env:RELEASE_DIR "Codex.Roslyn.Mcp.Tool.${{ inputs.version }}.nupkg")
-          --api-key $env:NUGET_API_KEY
+          --api-key $apiKey
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
