@@ -30,6 +30,12 @@ public sealed partial class BashGuardService
                 "For C# symbol lookup, prefer cs_symbol_search before broad shell search. Use rg only after semantic lookup is insufficient or exact source context is needed.");
         }
 
+        if (IsBroadDotnetTest(command))
+        {
+            return new BashGuardResult(
+                "For targeted .NET validation, prefer cs_test_impact first and run the returned dotnet test command. Broad dotnet test is still allowed when full-suite validation is intentional.");
+        }
+
         return new BashGuardResult(null);
     }
 
@@ -117,8 +123,22 @@ public sealed partial class BashGuardService
         return !normalized.Contains("--files", StringComparison.OrdinalIgnoreCase)
             && !normalized.Contains("--glob", StringComparison.OrdinalIgnoreCase)
             && !normalized.Contains("-g", StringComparison.OrdinalIgnoreCase)
-            && !normalized.Contains("SPECIFICATION.md", StringComparison.OrdinalIgnoreCase)
-            && !normalized.Contains("RESEARCH.md", StringComparison.OrdinalIgnoreCase);
+            && !normalized.Contains("docs/SPECIFICATION.md", StringComparison.OrdinalIgnoreCase)
+            && !normalized.Contains("docs/RESEARCH.md", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsBroadDotnetTest(string command)
+    {
+        var normalized = command.Trim();
+        if (!normalized.StartsWith("dotnet test", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !normalized.Contains(".csproj", StringComparison.OrdinalIgnoreCase)
+            && !normalized.Contains(".sln", StringComparison.OrdinalIgnoreCase)
+            && !normalized.Contains(".slnx", StringComparison.OrdinalIgnoreCase)
+            && !normalized.Contains("--filter", StringComparison.OrdinalIgnoreCase);
     }
 
     [GeneratedRegex(@"cat\s+\$\(\s*find\s+\.?\s+.*-name\s+['""]?\*\.cs['""]?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]

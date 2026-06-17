@@ -22,5 +22,5 @@ public sealed record IndexStatusSummary
 
     public int DeclarationsIndexed { get; init; }
 
-    public string Message { get; init; } = "Phase 0 skeleton does not create SQLite indexes.";
+    public string Message { get; init; } = "Cold index status is unavailable.";
 }

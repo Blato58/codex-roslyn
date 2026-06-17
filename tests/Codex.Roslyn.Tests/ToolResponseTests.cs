@@ -5,7 +5,7 @@ namespace Codex.Roslyn.Tests;
 public sealed class ToolResponseTests
 {
     [Fact]
-    public void Ok_UsesPhaseZeroCacheDefaults()
+    public void Ok_UsesCurrentCacheDefaults()
     {
         var response = ToolResponse<string>.Ok("done", ["item"]);
 

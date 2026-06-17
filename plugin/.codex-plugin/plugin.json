@@ -1,6 +1,6 @@
 {
   "name": "dotnet-semantic-tools",
-  "version": "0.1.0",
+  "version": "0.1.0-preview.20260617+codex.20260616233509",
   "description": "Roslyn semantic navigation, diagnostics, impact analysis, and safe refactor previews for C#/.NET repositories.",
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",

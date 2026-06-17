@@ -6,7 +6,7 @@ namespace Codex.Roslyn.Core;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddCodexRoslynPhaseZero(this IServiceCollection services)
+    public static IServiceCollection AddCodexRoslynServices(this IServiceCollection services)
     {
         services.AddSingleton<RepoIdentityService>();
         services.AddSingleton<IndexPathProvider>();
@@ -27,8 +27,16 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<WorkspaceManager>();
         services.AddSingleton<SemanticQueryService>();
         services.AddSingleton<BashGuardService>();
+        services.AddSingleton<WorkspaceEditCache>();
         services.AddSingleton<RefactorPreviewService>();
+        services.AddSingleton<ImpactAnalysisService>();
+        services.AddSingleton<AdvancedSemanticService>();
 
         return services;
+    }
+
+    public static IServiceCollection AddCodexRoslynPhaseZero(this IServiceCollection services)
+    {
+        return services.AddCodexRoslynServices();
     }
 }

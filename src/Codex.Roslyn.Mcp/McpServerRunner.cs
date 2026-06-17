@@ -20,7 +20,7 @@ public static class McpServerRunner
             options.LogToStandardErrorThreshold = LogLevel.Trace;
         });
 
-        builder.Services.AddCodexRoslynPhaseZero();
+        builder.Services.AddCodexRoslynServices();
         builder.Services.AddHostedService<ColdIndexWatcher>();
         builder.Services
             .AddMcpServer(options =>
@@ -28,7 +28,7 @@ public static class McpServerRunner
                 options.ServerInfo = new()
                 {
                     Name = "codex-roslyn",
-                    Version = "0.1.0"
+                    Version = "0.1.0-preview.20260617"
                 };
                 options.ServerInstructions = Instructions.Text;
             })
@@ -49,7 +49,7 @@ public static class McpServerRunner
             kestrel.Listen(IPAddress.Loopback, options.Port);
         });
 
-        builder.Services.AddCodexRoslynPhaseZero();
+        builder.Services.AddCodexRoslynServices();
         builder.Services.AddHostedService<ColdIndexWatcher>();
         builder.Services
             .AddMcpServer(serverOptions =>
@@ -57,7 +57,7 @@ public static class McpServerRunner
                 serverOptions.ServerInfo = new()
                 {
                     Name = "codex-roslyn",
-                    Version = "0.1.0"
+                    Version = "0.1.0-preview.20260617"
                 };
                 serverOptions.ServerInstructions = Instructions.Text;
             })

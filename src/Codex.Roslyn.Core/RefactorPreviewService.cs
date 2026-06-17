@@ -5,6 +5,7 @@ using Codex.Roslyn.Abstractions.ToolContracts;
 using Codex.Roslyn.Index;
 using Codex.Roslyn.Workspaces;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Formatting;
@@ -16,7 +17,8 @@ public sealed class RefactorPreviewService(
     SolutionSelectionService solutionSelectionService,
     WorkspaceManager workspaceManager,
     ColdIndexService coldIndexService,
-    SemanticSymbolCache symbolCache)
+    SemanticSymbolCache symbolCache,
+    WorkspaceEditCache editCache)
 {
     public async Task<ToolResponse<RefactorPreviewResult>> PreviewAsync(
         string operation,
@@ -33,126 +35,130 @@ public sealed class RefactorPreviewService(
             "rename" => await PreviewRenameAsync(symbolId, newName, scope, detailLevel, maxItems, cancellationToken),
             "organize_usings" => await PreviewOrganizeUsingsAsync(file, scope, detailLevel, maxItems, cancellationToken),
             "move_type_to_file" => await PreviewMoveTypeToFileAsync(symbolId, file, scope, detailLevel, maxItems, cancellationToken),
-            "move_type_to_namespace" or "extract_interface" or "change_namespace" => Unsupported<RefactorPreviewResult>(operation, detailLevel),
+            "move_type_to_namespace" or "change_namespace" => await PreviewChangeNamespaceAsync(NormalizeOperation(operation), symbolId, newName, scope, detailLevel, maxItems, cancellationToken),
+            "extract_interface" => await PreviewExtractInterfaceAsync(symbolId, newName, file, scope, detailLevel, maxItems, cancellationToken),
             _ => Unsupported<RefactorPreviewResult>(operation, detailLevel)
         };
     }
 
-    public async Task<ToolResponse<ChangeImpactResult>> ChangeImpactAsync(
-        IReadOnlyList<string>? symbolIds = null,
-        IReadOnlyList<string>? changedFiles = null,
+    public async Task<ToolResponse<WorkspaceEditApplyResult>> ApplyWorkspaceEditAsync(
+        string editId,
         ToolScope? scope = null,
         string detailLevel = "normal",
-        int maxItems = 50,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(editId) || !editCache.TryGet(editId, out var edit))
+        {
+            return Empty<WorkspaceEditApplyResult>("unknown_edit", "Workspace edit was not found in this server process.", detailLevel);
+        }
+
         var loaded = await LoadAsync(scope, detailLevel, cancellationToken);
         if (loaded.ResponseKind is not null)
         {
-            return Empty<ChangeImpactResult>(loaded.ResponseKind, loaded.Summary, detailLevel, loaded.Warning);
+            return Empty<WorkspaceEditApplyResult>(loaded.ResponseKind, loaded.Summary, detailLevel, loaded.Warning);
         }
 
-        var impactedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var changedFile in changedFiles ?? [])
+        if (!string.Equals(Path.GetFullPath(edit.RepoRoot), Path.GetFullPath(loaded.RepoRoot), StringComparison.OrdinalIgnoreCase))
         {
-            impactedFiles.Add(NormalizePath(changedFile));
+            return Empty<WorkspaceEditApplyResult>("invalid_request", "Workspace edit belongs to a different repository.", detailLevel);
         }
 
-        var reasons = new List<string>();
-        foreach (var symbolId in symbolIds ?? [])
+        if (!string.Equals(edit.SolutionId, loaded.Solution!.SolutionId, StringComparison.Ordinal))
         {
-            if (!symbolCache.TryGet(symbolId, out var symbol))
+            return Empty<WorkspaceEditApplyResult>("invalid_request", "Workspace edit belongs to a different solution.", detailLevel);
+        }
+
+        var repoRoot = Path.GetFullPath(loaded.RepoRoot);
+        var skipped = new List<string>();
+        var applied = new List<string>();
+        foreach (var file in edit.Files)
+        {
+            var fullPath = Path.GetFullPath(file.FullPath);
+            var repoPrefix = repoRoot.EndsWith(Path.DirectorySeparatorChar)
+                ? repoRoot
+                : repoRoot + Path.DirectorySeparatorChar;
+            if (!fullPath.StartsWith(repoPrefix, StringComparison.OrdinalIgnoreCase))
             {
-                reasons.Add($"Symbol {symbolId} is not in the warm semantic cache.");
+                skipped.Add($"{file.RelativePath}: outside repository");
                 continue;
             }
 
-            var references = await SymbolFinder.FindReferencesAsync(symbol, loaded.Handle!.Solution, cancellationToken);
-            foreach (var path in GetReferenceFiles(loaded.Handle.Solution, loaded.RepoRoot, references))
+            if (file.OriginalHash is null)
             {
-                impactedFiles.Add(path);
+                if (File.Exists(fullPath))
+                {
+                    skipped.Add($"{file.RelativePath}: file already exists");
+                    continue;
+                }
             }
+            else
+            {
+                if (!File.Exists(fullPath))
+                {
+                    skipped.Add($"{file.RelativePath}: file no longer exists");
+                    continue;
+                }
 
-            reasons.Add($"Semantic references for {symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)} were inspected.");
+                var currentHash = WorkspaceEditCache.HashText(await File.ReadAllTextAsync(fullPath, cancellationToken));
+                if (!string.Equals(currentHash, file.OriginalHash, StringComparison.Ordinal))
+                {
+                    skipped.Add($"{file.RelativePath}: file changed since preview");
+                    continue;
+                }
+            }
         }
 
-        var files = impactedFiles.Take(Math.Clamp(maxItems, 1, 500)).ToArray();
-        var grouped = files
-            .GroupBy(GetImpactArea, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new ChangeImpactResult
-            {
-                Area = group.Key,
-                Kind = group.Key.Contains("test", StringComparison.OrdinalIgnoreCase) ? "test" : "source",
-                Confidence = reasons.Count > 0 ? "high" : "medium",
-                Reasons = reasons.Count > 0 ? reasons : ["Changed files were grouped by path and project naming."],
-                Files = group.ToArray()
-            })
-            .ToArray();
-
-        return ToolResponse<ChangeImpactResult>.Ok(
-            $"Identified {grouped.Length} impacted areas across {files.Length} files.",
-            grouped,
-            detailLevel,
-            "hit",
-            "warm");
-    }
-
-    public async Task<ToolResponse<TestImpactResult>> TestImpactAsync(
-        IReadOnlyList<string>? symbolIds = null,
-        IReadOnlyList<string>? changedFiles = null,
-        ToolScope? scope = null,
-        string detailLevel = "normal",
-        int maxItems = 50,
-        CancellationToken cancellationToken = default)
-    {
-        var impact = await ChangeImpactAsync(symbolIds, changedFiles, scope, detailLevel, maxItems, cancellationToken);
-        if (impact.ResultKind != "ok")
+        if (skipped.Count > 0)
         {
-            return new ToolResponse<TestImpactResult>
+            return new ToolResponse<WorkspaceEditApplyResult>
             {
-                ResultKind = impact.ResultKind,
-                Summary = impact.Summary,
-                Items = [],
-                CacheStatus = impact.CacheStatus,
-                TokenPolicy = impact.TokenPolicy,
-                Warnings = impact.Warnings
+                ResultKind = "stale_edit",
+                Summary = "Workspace edit was not applied because one or more files changed or were unsafe.",
+                Items =
+                [
+                    new WorkspaceEditApplyResult
+                    {
+                        EditId = edit.EditId,
+                        Operation = edit.Operation,
+                        SkippedFiles = skipped,
+                        DiagnosticsBefore = edit.DiagnosticsBefore,
+                        DiagnosticsAfter = edit.DiagnosticsAfter
+                    }
+                ],
+                CacheStatus = new CacheStatus { Index = "hit", Workspace = "warm" },
+                TokenPolicy = new TokenPolicy { DetailLevel = detailLevel, EstimatedTokens = 160 }
             };
         }
 
-        var testFiles = impact.Items
-            .SelectMany(item => item.Files)
-            .Where(file => file.Contains("test", StringComparison.OrdinalIgnoreCase))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(Math.Clamp(maxItems, 1, 500))
-            .ToArray();
+        foreach (var file in edit.Files.Where(file => file.Edits > 0))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(file.FullPath)!);
+            await File.WriteAllTextAsync(file.FullPath, file.NewText, cancellationToken);
+            applied.Add(file.RelativePath);
+        }
 
-        var items = testFiles.Length == 0
-            ? [new TestImpactResult
-            {
-                TestArea = "targeted_project_tests",
-                Confidence = "medium",
-                Reasons = ["No direct test file reference was found; run tests for projects adjacent to impacted source files."],
-                Files = impact.Items.SelectMany(item => item.Files).ToArray()
-            }]
-            : impact.Items
-                .SelectMany(item => item.Files)
-                .Where(file => file.Contains("test", StringComparison.OrdinalIgnoreCase))
-                .GroupBy(GetImpactArea, StringComparer.OrdinalIgnoreCase)
-                .Select(group => new TestImpactResult
-                {
-                    TestArea = group.Key,
-                    Confidence = "high",
-                    Reasons = ["Test files were directly referenced or grouped with impacted symbols."],
-                    Files = group.Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
-                })
-                .ToArray();
+        editCache.Remove(editId);
+        workspaceManager.MarkAllStale();
+        coldIndexService.MarkDirty(loaded.RepoRoot);
 
-        return ToolResponse<TestImpactResult>.Ok(
-            $"Recommended {items.Length} test areas.",
-            items,
+        var result = new WorkspaceEditApplyResult
+        {
+            EditId = edit.EditId,
+            Operation = edit.Operation,
+            AppliedFiles = applied.Count,
+            AppliedSpans = edit.Files.Sum(file => file.Edits),
+            AppliedFilePaths = applied,
+            DiagnosticsBefore = edit.DiagnosticsBefore,
+            DiagnosticsAfter = edit.DiagnosticsAfter,
+            RollbackWarning = applied.Count == 0 ? null : "No automatic rollback was created; use source control to review or revert applied changes."
+        };
+
+        return ToolResponse<WorkspaceEditApplyResult>.Ok(
+            $"Applied {result.AppliedSpans} spans across {result.AppliedFiles} files.",
+            [result],
             detailLevel,
-            "hit",
-            "warm");
+            "stale",
+            "cold");
     }
 
     private async Task<ToolResponse<RefactorPreviewResult>> PreviewRenameAsync(
@@ -193,6 +199,7 @@ public sealed class RefactorPreviewService(
             afterDiagnostics,
             riskReasons,
             maxItems);
+        StorePreview(loaded.RepoRoot, result, changes);
 
         return ToolResponse<RefactorPreviewResult>.Ok(
             $"Rename would update {result.ChangedSpans} spans across {result.ChangedFiles} files.",
@@ -235,7 +242,7 @@ public sealed class RefactorPreviewService(
         var relative = RelativePath(loaded.RepoRoot, document.FilePath!);
         DocumentPreviewChanges[] changes = textChanges.Length == 0
             ? []
-            : [new DocumentPreviewChanges(relative, document.Id, oldText, textChanges)];
+            : [new DocumentPreviewChanges(relative, document.Id, oldText, textChanges, null, document.FilePath)];
         var beforeDiagnostics = await CountDiagnosticsAsync(loaded.Handle.Solution, cancellationToken);
         var afterDiagnostics = beforeDiagnostics;
         var result = CreatePreviewResult(
@@ -247,6 +254,7 @@ public sealed class RefactorPreviewService(
             afterDiagnostics,
             [],
             maxItems);
+        StorePreview(loaded.RepoRoot, result, changes);
 
         return ToolResponse<RefactorPreviewResult>.Ok(
             $"Organize usings would update {result.ChangedSpans} spans across {result.ChangedFiles} files.",
@@ -309,9 +317,138 @@ public sealed class RefactorPreviewService(
             afterDiagnostics,
             riskReasons,
             maxItems);
+        StorePreview(loaded.RepoRoot, result, changes.Changes);
 
         return ToolResponse<RefactorPreviewResult>.Ok(
             $"Move type to file would update {result.ChangedSpans} spans across {result.ChangedFiles} files.",
+            [result],
+            detailLevel,
+            "hit",
+            "warm");
+    }
+
+    private async Task<ToolResponse<RefactorPreviewResult>> PreviewChangeNamespaceAsync(
+        string operation,
+        string? symbolId,
+        string? newName,
+        ToolScope? scope,
+        string detailLevel,
+        int maxItems,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(symbolId) || !symbolCache.TryGet(symbolId, out var symbol))
+        {
+            return Empty<RefactorPreviewResult>("stale_symbol", "Namespace preview requires a warm named type symbol. Use cs_symbol_at first.", detailLevel);
+        }
+
+        if (symbol is not INamedTypeSymbol namedType)
+        {
+            return Empty<RefactorPreviewResult>("invalid_request", "Namespace preview requires a named type symbol.", detailLevel);
+        }
+
+        if (string.IsNullOrWhiteSpace(newName))
+        {
+            return Empty<RefactorPreviewResult>("invalid_request", "Namespace preview requires newName.", detailLevel);
+        }
+
+        var loaded = await LoadAsync(scope, detailLevel, cancellationToken);
+        if (loaded.ResponseKind is not null)
+        {
+            return Empty<RefactorPreviewResult>(loaded.ResponseKind, loaded.Summary, detailLevel, loaded.Warning);
+        }
+
+        var changes = await BuildChangeNamespaceChangesAsync(loaded.Handle!.Solution, loaded.RepoRoot, namedType, newName.Trim(), cancellationToken);
+        if (changes.ResponseKind is not null)
+        {
+            return Empty<RefactorPreviewResult>(changes.ResponseKind, changes.Summary, detailLevel);
+        }
+
+        var beforeDiagnostics = await CountDiagnosticsAsync(loaded.Handle.Solution, cancellationToken);
+        var previewSolution = await ApplyChangesAsync(loaded.Handle.Solution, changes.Changes, cancellationToken);
+        var afterDiagnostics = await CountDiagnosticsAsync(previewSolution, cancellationToken);
+        var riskReasons = GetRiskReasons(namedType, changes.Changes, afterDiagnostics - beforeDiagnostics);
+        var result = CreatePreviewResult(
+            operation,
+            symbolId,
+            loaded.Solution!.SolutionId,
+            changes.Changes,
+            beforeDiagnostics,
+            afterDiagnostics,
+            riskReasons,
+            maxItems);
+        StorePreview(loaded.RepoRoot, result, changes.Changes);
+
+        return ToolResponse<RefactorPreviewResult>.Ok(
+            $"{operation} would update {result.ChangedSpans} spans across {result.ChangedFiles} files.",
+            [result],
+            detailLevel,
+            "hit",
+            "warm");
+    }
+
+    private async Task<ToolResponse<RefactorPreviewResult>> PreviewExtractInterfaceAsync(
+        string? symbolId,
+        string? newName,
+        string? file,
+        ToolScope? scope,
+        string detailLevel,
+        int maxItems,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(symbolId) || !symbolCache.TryGet(symbolId, out var symbol))
+        {
+            return Empty<RefactorPreviewResult>("stale_symbol", "Extract interface preview requires a warm class symbol. Use cs_symbol_at first.", detailLevel);
+        }
+
+        if (symbol is not INamedTypeSymbol { TypeKind: TypeKind.Class } namedType)
+        {
+            return Empty<RefactorPreviewResult>("invalid_request", "Extract interface preview requires a class symbol.", detailLevel);
+        }
+
+        var interfaceName = string.IsNullOrWhiteSpace(newName) ? "I" + namedType.Name : newName.Trim();
+        var loaded = await LoadAsync(scope, detailLevel, cancellationToken);
+        if (loaded.ResponseKind is not null)
+        {
+            return Empty<RefactorPreviewResult>(loaded.ResponseKind, loaded.Summary, detailLevel, loaded.Warning);
+        }
+
+        var destinationFile = file;
+        if (string.IsNullOrWhiteSpace(destinationFile))
+        {
+            var declarationPath = namedType.Locations.FirstOrDefault(location => location.IsInSource)?.GetLineSpan().Path;
+            var sourceRelative = declarationPath is null ? $"{interfaceName}.cs" : RelativePath(loaded.RepoRoot, declarationPath);
+            var directory = Path.GetDirectoryName(NormalizePath(sourceRelative))?.Replace('\\', '/');
+            destinationFile = string.IsNullOrWhiteSpace(directory) ? $"{interfaceName}.cs" : $"{directory}/{interfaceName}.cs";
+        }
+
+        if (!TryNormalizeDestinationPath(loaded.RepoRoot, destinationFile, out destinationFile, out var destinationError))
+        {
+            return Empty<RefactorPreviewResult>("invalid_request", destinationError, detailLevel);
+        }
+
+        var changes = await BuildExtractInterfaceChangesAsync(loaded.Handle!.Solution, loaded.RepoRoot, namedType, interfaceName, destinationFile, cancellationToken);
+        if (changes.ResponseKind is not null)
+        {
+            return Empty<RefactorPreviewResult>(changes.ResponseKind, changes.Summary, detailLevel);
+        }
+
+        var beforeDiagnostics = await CountDiagnosticsAsync(loaded.Handle.Solution, cancellationToken);
+        var previewSolution = await ApplyChangesAsync(loaded.Handle.Solution, changes.Changes, cancellationToken);
+        var afterDiagnostics = await CountDiagnosticsAsync(previewSolution, cancellationToken);
+        var riskReasons = GetRiskReasons(namedType, changes.Changes, afterDiagnostics - beforeDiagnostics);
+        var result = CreatePreviewResult(
+            "extract_interface",
+            symbolId,
+            loaded.Solution!.SolutionId,
+            changes.Changes,
+            beforeDiagnostics,
+            afterDiagnostics,
+            riskReasons,
+            maxItems);
+        StorePreview(loaded.RepoRoot, result, changes.Changes);
+
+        return ToolResponse<RefactorPreviewResult>.Ok(
+            $"Extract interface would update {result.ChangedSpans} spans across {result.ChangedFiles} files.",
             [result],
             detailLevel,
             "hit",
@@ -352,7 +489,7 @@ public sealed class RefactorPreviewService(
                 .OrderByDescending(change => change.Span.Start)
                 .ToArray();
 
-            changes.Add(new DocumentPreviewChanges(RelativePath(repoRoot, document.FilePath), document.Id, oldText, textChanges));
+            changes.Add(new DocumentPreviewChanges(RelativePath(repoRoot, document.FilePath), document.Id, oldText, textChanges, null, document.FilePath));
         }
 
         return changes;
@@ -421,9 +558,15 @@ public sealed class RefactorPreviewService(
             return MoveTypeChangesResult.Fail("invalid_request", "Move type preview could not resolve the source document.");
         }
 
+        var sourceFile = RelativePath(repoRoot, sourceDocument.FilePath);
+        if (string.Equals(sourceFile, destinationFile, StringComparison.OrdinalIgnoreCase))
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Destination file must be different from the source file.");
+        }
+
         var sourceText = await sourceDocument.GetTextAsync(cancellationToken);
         var sourceChange = new DocumentPreviewChanges(
-            RelativePath(repoRoot, sourceDocument.FilePath),
+            sourceFile,
             sourceDocument.Id,
             sourceText,
             [new TextChange(syntax.FullSpan, string.Empty)],
@@ -432,35 +575,231 @@ public sealed class RefactorPreviewService(
 
         var destinationPath = Path.Combine(repoRoot, destinationFile.Replace('/', Path.DirectorySeparatorChar));
         var destinationText = BuildMovedTypeText(syntax, namedType, declarationReference.SyntaxTree);
-        var destinationDocument = FindDocument(solution, repoRoot, destinationFile);
-        DocumentPreviewChanges destinationChange;
-        if (destinationDocument?.FilePath is not null)
+        if (FindDocument(solution, repoRoot, destinationFile) is not null)
         {
-            var oldText = await destinationDocument.GetTextAsync(cancellationToken);
-            var insertText = oldText.Length == 0 || oldText.ToString().EndsWith(Environment.NewLine, StringComparison.Ordinal)
-                ? destinationText
-                : Environment.NewLine + destinationText;
-            destinationChange = new DocumentPreviewChanges(
-                destinationFile,
-                destinationDocument.Id,
-                oldText,
-                [new TextChange(new TextSpan(oldText.Length, 0), insertText)],
-                null,
-                destinationDocument.FilePath);
-        }
-        else
-        {
-            var documentId = DocumentId.CreateNewId(sourceDocument.Project.Id);
-            destinationChange = new DocumentPreviewChanges(
-                destinationFile,
-                documentId,
-                SourceText.From(string.Empty, Encoding.UTF8),
-                [new TextChange(new TextSpan(0, 0), destinationText)],
-                sourceDocument.Project.Id,
-                destinationPath);
+            return MoveTypeChangesResult.Fail("invalid_request", "Destination file already exists.");
         }
 
+        var documentId = DocumentId.CreateNewId(sourceDocument.Project.Id);
+        var destinationChange = new DocumentPreviewChanges(
+            destinationFile,
+            documentId,
+            SourceText.From(string.Empty, Encoding.UTF8),
+            [new TextChange(new TextSpan(0, 0), destinationText)],
+            sourceDocument.Project.Id,
+            destinationPath);
+
         return MoveTypeChangesResult.Ok([sourceChange, destinationChange]);
+    }
+
+    private static async Task<MoveTypeChangesResult> BuildChangeNamespaceChangesAsync(
+        Solution solution,
+        string repoRoot,
+        INamedTypeSymbol namedType,
+        string newNamespace,
+        CancellationToken cancellationToken)
+    {
+        var declarationReference = namedType.DeclaringSyntaxReferences.FirstOrDefault(reference => reference.SyntaxTree is not null);
+        if (declarationReference is null)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Namespace preview requires a source-declared type.");
+        }
+
+        var sourceDocument = solution.GetDocument(declarationReference.SyntaxTree);
+        if (sourceDocument?.FilePath is null)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Namespace preview could not resolve the source document.");
+        }
+
+        var syntax = await declarationReference.GetSyntaxAsync(cancellationToken);
+        var namespaceNode = syntax.AncestorsAndSelf()
+            .OfType<BaseNamespaceDeclarationSyntax>()
+            .FirstOrDefault();
+        if (namespaceNode is null)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Namespace preview requires a file-scoped or block-scoped namespace.");
+        }
+
+        var oldNamespace = namedType.ContainingNamespace?.IsGlobalNamespace == false
+            ? namedType.ContainingNamespace.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)
+            : string.Empty;
+        if (string.IsNullOrWhiteSpace(oldNamespace))
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Namespace preview requires a non-global containing namespace.");
+        }
+
+        if (!string.Equals(namespaceNode.Name.ToString(), oldNamespace, StringComparison.Ordinal))
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Namespace preview requires a namespace declaration that names the full containing namespace.");
+        }
+
+        var changes = new List<DocumentPreviewChanges>();
+        foreach (var document in solution.Projects.SelectMany(project => project.Documents))
+        {
+            if (document.FilePath is null)
+            {
+                continue;
+            }
+
+            var root = await document.GetSyntaxRootAsync(cancellationToken);
+            if (root is null)
+            {
+                continue;
+            }
+
+            var textChanges = new List<TextChange>();
+            if (document.Id == sourceDocument.Id)
+            {
+                textChanges.Add(new TextChange(namespaceNode.Name.Span, newNamespace));
+            }
+
+            textChanges.AddRange(BuildNamespaceReferenceChanges(root, oldNamespace, newNamespace, namedType.Name));
+            var distinctChanges = textChanges
+                .DistinctBy(change => change.Span)
+                .OrderByDescending(change => change.Span.Start)
+                .ToArray();
+            if (distinctChanges.Length == 0)
+            {
+                continue;
+            }
+
+            changes.Add(new DocumentPreviewChanges(
+                RelativePath(repoRoot, document.FilePath),
+                document.Id,
+                await document.GetTextAsync(cancellationToken),
+                distinctChanges,
+                null,
+                document.FilePath));
+        }
+
+        return MoveTypeChangesResult.Ok(changes);
+    }
+
+    private static async Task<MoveTypeChangesResult> BuildExtractInterfaceChangesAsync(
+        Solution solution,
+        string repoRoot,
+        INamedTypeSymbol namedType,
+        string interfaceName,
+        string destinationFile,
+        CancellationToken cancellationToken)
+    {
+        var declarationReference = namedType.DeclaringSyntaxReferences.FirstOrDefault(reference => reference.SyntaxTree is not null);
+        if (declarationReference is null)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Extract interface preview requires a source-declared class.");
+        }
+
+        var syntax = await declarationReference.GetSyntaxAsync(cancellationToken);
+        if (syntax is not ClassDeclarationSyntax classDeclaration)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Extract interface preview requires a class declaration.");
+        }
+
+        var sourceDocument = solution.GetDocument(declarationReference.SyntaxTree);
+        if (sourceDocument?.FilePath is null)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Extract interface preview could not resolve the source document.");
+        }
+
+        var members = namedType.GetMembers()
+            .Where(member => member.DeclaredAccessibility == Accessibility.Public && !member.IsStatic)
+            .Where(member => member is IMethodSymbol { MethodKind: MethodKind.Ordinary } or IPropertySymbol)
+            .Select(member => member switch
+            {
+                IMethodSymbol method => $"{method.ReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {method.Name}({string.Join(", ", method.Parameters.Select(parameter => $"{parameter.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {parameter.Name}"))});",
+                IPropertySymbol property => $"{property.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {property.Name} {{ get; }}",
+                _ => string.Empty
+            })
+            .Where(member => !string.IsNullOrWhiteSpace(member))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (members.Length == 0)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Extract interface preview found no public instance members to include.");
+        }
+
+        var namespaceName = namedType.ContainingNamespace?.IsGlobalNamespace == false
+            ? namedType.ContainingNamespace.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)
+            : null;
+        var builder = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(namespaceName))
+        {
+            builder.Append("namespace ");
+            builder.Append(namespaceName);
+            builder.AppendLine(";");
+            builder.AppendLine();
+        }
+
+        builder.Append("public interface ");
+        builder.AppendLine(interfaceName);
+        builder.AppendLine("{");
+        foreach (var member in members)
+        {
+            builder.Append("    ");
+            builder.AppendLine(member);
+        }
+
+        builder.AppendLine("}");
+
+        var destinationPath = Path.Combine(repoRoot, destinationFile.Replace('/', Path.DirectorySeparatorChar));
+        if (FindDocument(solution, repoRoot, destinationFile) is not null)
+        {
+            return MoveTypeChangesResult.Fail("invalid_request", "Destination file already exists.");
+        }
+
+        var destinationChange = new DocumentPreviewChanges(
+            destinationFile,
+            DocumentId.CreateNewId(sourceDocument.Project.Id),
+            SourceText.From(string.Empty, Encoding.UTF8),
+            [new TextChange(new TextSpan(0, 0), builder.ToString())],
+            sourceDocument.Project.Id,
+            destinationPath);
+
+        var sourceText = await sourceDocument.GetTextAsync(cancellationToken);
+        var updatedClass = classDeclaration.AddBaseListTypes(
+            SyntaxFactory.SimpleBaseType(SyntaxFactory.IdentifierName(interfaceName)));
+        var sourceChange = new DocumentPreviewChanges(
+            RelativePath(repoRoot, sourceDocument.FilePath),
+            sourceDocument.Id,
+            sourceText,
+            [new TextChange(classDeclaration.Span, updatedClass.ToFullString())],
+            null,
+            sourceDocument.FilePath);
+
+        return MoveTypeChangesResult.Ok([sourceChange, destinationChange]);
+    }
+
+    private static IEnumerable<TextChange> BuildNamespaceReferenceChanges(
+        SyntaxNode root,
+        string oldNamespace,
+        string newNamespace,
+        string typeName)
+    {
+        foreach (var usingDirective in root.DescendantNodes().OfType<UsingDirectiveSyntax>())
+        {
+            if (usingDirective.StaticKeyword.RawKind != 0 || usingDirective.Alias is not null || usingDirective.Name is null)
+            {
+                continue;
+            }
+
+            if (string.Equals(usingDirective.Name.ToString(), oldNamespace, StringComparison.Ordinal))
+            {
+                yield return new TextChange(usingDirective.Name.Span, newNamespace);
+            }
+        }
+
+        foreach (var qualifiedName in root.DescendantNodes().OfType<QualifiedNameSyntax>())
+        {
+            if (qualifiedName.Right.Identifier.ValueText != typeName)
+            {
+                continue;
+            }
+
+            if (string.Equals(qualifiedName.Left.ToString(), oldNamespace, StringComparison.Ordinal))
+            {
+                yield return new TextChange(qualifiedName.Left.Span, newNamespace);
+            }
+        }
     }
 
     private static RefactorPreviewResult CreatePreviewResult(
@@ -496,6 +835,41 @@ public sealed class RefactorPreviewService(
             DiffPreview = BuildCompactDiff(changes, maxItems),
             RequiresApproval = true
         };
+    }
+
+    private void StorePreview(string repoRoot, RefactorPreviewResult result, IReadOnlyList<DocumentPreviewChanges> changes)
+    {
+        if (string.IsNullOrWhiteSpace(result.EditId) || string.IsNullOrWhiteSpace(result.SolutionId))
+        {
+            return;
+        }
+
+        var files = changes
+            .Where(change => change.Changes.Count > 0 && change.FilePath is not null)
+            .Select(change =>
+            {
+                var newText = change.OriginalText.WithChanges(change.Changes).ToString();
+                var originalText = change.OriginalText.ToString();
+                var originalHash = string.IsNullOrEmpty(originalText) && !File.Exists(change.FilePath!)
+                    ? null
+                    : WorkspaceEditCache.HashText(originalText);
+                return new CachedWorkspaceEditFile(
+                    change.File,
+                    change.FilePath!,
+                    originalHash,
+                    newText,
+                    change.Changes.Count);
+            })
+            .ToArray();
+
+        editCache.Store(new CachedWorkspaceEdit(
+            result.EditId,
+            repoRoot,
+            result.SolutionId,
+            result.Operation,
+            result.DiagnosticsBefore,
+            result.DiagnosticsAfter,
+            files));
     }
 
     private static string BuildCompactDiff(IReadOnlyList<DocumentPreviewChanges> changes, int maxItems)
@@ -547,6 +921,35 @@ public sealed class RefactorPreviewService(
         if (symbol.Locations.Any(location => location.IsInSource && IsGeneratedPath(location.GetLineSpan().Path)))
         {
             reasons.Add("Symbol is declared in generated-looking source.");
+        }
+
+        if (symbol is INamedTypeSymbol { DeclaringSyntaxReferences.Length: > 0 } namedType)
+        {
+            var syntax = namedType.DeclaringSyntaxReferences
+                .Select(reference => reference.GetSyntax())
+                .FirstOrDefault();
+            if (syntax is BaseTypeDeclarationSyntax { Modifiers: var modifiers }
+                && modifiers.Any(SyntaxKind.PartialKeyword))
+            {
+                reasons.Add("Symbol is declared as partial.");
+            }
+        }
+
+        if (symbol.Name.EndsWith("Dto", StringComparison.Ordinal)
+            || symbol.ContainingNamespace?.ToDisplayString().Contains("Contract", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            reasons.Add("Symbol looks like a public contract or DTO candidate.");
+        }
+
+        if (changes.Any(change => change.File.Contains("Controller", StringComparison.OrdinalIgnoreCase)
+            || change.File.Contains("Endpoint", StringComparison.OrdinalIgnoreCase)))
+        {
+            reasons.Add("Change touches API route or endpoint-looking code.");
+        }
+
+        if (changes.Any(change => change.OriginalText.ToString().Contains($"\"{symbol.Name}\"", StringComparison.Ordinal)))
+        {
+            reasons.Add("Symbol name appears in string literals that could be reflection or serialization candidates.");
         }
 
         if (newDiagnosticDelta > 0)
@@ -622,29 +1025,6 @@ public sealed class RefactorPreviewService(
             });
     }
 
-    private static IEnumerable<string> GetReferenceFiles(
-        Solution solution,
-        string repoRoot,
-        IEnumerable<ReferencedSymbol> references)
-    {
-        foreach (var referencedSymbol in references)
-        {
-            foreach (var location in referencedSymbol.Definition.Locations.Concat(referencedSymbol.Locations.Select(reference => reference.Location)))
-            {
-                if (location.SourceTree is null)
-                {
-                    continue;
-                }
-
-                var document = solution.GetDocument(location.SourceTree);
-                if (document?.FilePath is not null)
-                {
-                    yield return RelativePath(repoRoot, document.FilePath);
-                }
-            }
-        }
-    }
-
     private static ToolResponse<TItem> Empty<TItem>(string resultKind, string summary, string detailLevel, string? warning = null)
     {
         return new ToolResponse<TItem>
@@ -662,7 +1042,7 @@ public sealed class RefactorPreviewService(
     {
         return Empty<TItem>(
             "unsupported_operation",
-            $"Operation '{operation}' is not implemented in the current Phase 4 preview slice.",
+            $"Operation '{operation}' is not supported by the current preview surface.",
             detailLevel);
     }
 
@@ -760,17 +1140,6 @@ public sealed class RefactorPreviewService(
         }
 
         return reasons.Count > 0 ? "medium" : "low";
-    }
-
-    private static string GetImpactArea(string file)
-    {
-        var parts = NormalizePath(file).Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length >= 2 && (parts[0] is "src" or "tests" or "test"))
-        {
-            return $"{parts[0]}/{parts[1]}";
-        }
-
-        return parts.FirstOrDefault() ?? "repo";
     }
 
     private static string GetProjectLikeSegment(string file)

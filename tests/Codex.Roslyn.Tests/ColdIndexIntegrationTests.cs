@@ -45,7 +45,7 @@ public sealed class ColdIndexIntegrationTests
     {
         cacheRoot = CreateTempDirectory();
         var services = new ServiceCollection();
-        services.AddCodexRoslynPhaseZero();
+        services.AddCodexRoslynServices();
         services.AddSingleton(new IndexPathProvider(cacheRoot));
         return services.BuildServiceProvider();
     }

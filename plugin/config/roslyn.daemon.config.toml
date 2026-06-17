@@ -8,7 +8,9 @@ enabled_tools = [
   "cs_symbol_at",
   "cs_find_references",
   "cs_diagnostics",
+  "cs_diagnostics_summary",
   "cs_change_impact",
   "cs_test_impact",
-  "cs_refactor_preview"
+  "cs_refactor_preview",
+  "cs_context_pack"
 ]

@@ -14,7 +14,9 @@ public sealed class RepoTools(
     DocumentOutlineService documentOutlineService,
     SolutionSelectionService solutionSelectionService,
     SemanticQueryService semanticQueryService,
-    RefactorPreviewService refactorPreviewService)
+    RefactorPreviewService refactorPreviewService,
+    ImpactAnalysisService impactAnalysisService,
+    AdvancedSemanticService advancedSemanticService)
 {
     [McpServerTool]
     [Description("Summarize the repository, discovered solutions, and cold index freshness without loading MSBuildWorkspace.")]
@@ -187,6 +189,16 @@ public sealed class RepoTools(
     }
 
     [McpServerTool]
+    [Description("Apply a cached workspace edit produced by a preview tool in this server process. Disabled by default in plugin config.")]
+    public Task<ToolResponse<WorkspaceEditApplyResult>> cs_apply_workspace_edit(
+        string editId,
+        ToolScope? scope = null,
+        string detailLevel = "normal")
+    {
+        return refactorPreviewService.ApplyWorkspaceEditAsync(editId, scope, detailLevel);
+    }
+
+    [McpServerTool]
     [Description("Estimate impacted source/test areas from changed files or warm semantic symbols.")]
     public Task<ToolResponse<ChangeImpactResult>> cs_change_impact(
         IReadOnlyList<string>? symbolIds = null,
@@ -196,7 +208,7 @@ public sealed class RepoTools(
         int maxItems = 50,
         string? cursor = null)
     {
-        return refactorPreviewService.ChangeImpactAsync(symbolIds, changedFiles, scope, detailLevel, maxItems);
+        return impactAnalysisService.ChangeImpactAsync(symbolIds, changedFiles, scope, detailLevel, maxItems);
     }
 
     [McpServerTool]
@@ -209,6 +221,137 @@ public sealed class RepoTools(
         int maxItems = 50,
         string? cursor = null)
     {
-        return refactorPreviewService.TestImpactAsync(symbolIds, changedFiles, scope, detailLevel, maxItems);
+        return impactAnalysisService.TestImpactAsync(symbolIds, changedFiles, scope, detailLevel, maxItems);
+    }
+
+    [McpServerTool]
+    [Description("Build a compact semantic context pack for a task, symbols, and files.")]
+    public Task<ToolResponse<ContextPackResult>> cs_context_pack(
+        IReadOnlyList<string>? symbolIds = null,
+        IReadOnlyList<string>? files = null,
+        ToolScope? scope = null,
+        string detailLevel = "normal",
+        int maxItems = 20,
+        int maxTokens = 2500)
+    {
+        return advancedSemanticService.ContextPackAsync(symbolIds, files, scope, detailLevel, maxItems, maxTokens);
+    }
+
+    [McpServerTool]
+    [Description("Return compiler diagnostics grouped by severity, project, and file.")]
+    public Task<ToolResponse<DiagnosticsSummaryResult>> cs_diagnostics_summary(
+        ToolScope? scope = null,
+        string? path = null,
+        string severityAtLeast = "warning",
+        string detailLevel = "normal",
+        int maxItems = 50)
+    {
+        return advancedSemanticService.DiagnosticsSummaryAsync(scope, path, severityAtLeast, detailLevel, maxItems);
+    }
+
+    [McpServerTool]
+    [Description("Return a capped call graph slice for a warm semantic symbol. Disabled by default.")]
+    public Task<ToolResponse<CallGraphResult>> cs_full_call_graph(
+        string symbolId,
+        ToolScope? scope = null,
+        string direction = "callers",
+        string detailLevel = "normal",
+        int maxItems = 50)
+    {
+        return advancedSemanticService.FullCallGraphAsync(symbolId, scope, direction, detailLevel, maxItems);
+    }
+
+    [McpServerTool]
+    [Description("Return capped Roslyn data-flow facts for the syntax node at a file position. Disabled by default.")]
+    public Task<ToolResponse<FlowAnalysisResult>> cs_data_flow(
+        string file,
+        int line,
+        int column,
+        ToolScope? scope = null,
+        string detailLevel = "normal",
+        int maxItems = 50)
+    {
+        return advancedSemanticService.DataFlowAsync(file, line, column, scope, detailLevel, maxItems);
+    }
+
+    [McpServerTool]
+    [Description("Return capped Roslyn control-flow facts for the statement at a file position. Disabled by default.")]
+    public Task<ToolResponse<FlowAnalysisResult>> cs_control_flow(
+        string file,
+        int line,
+        int column,
+        ToolScope? scope = null,
+        string detailLevel = "normal",
+        int maxItems = 50)
+    {
+        return advancedSemanticService.ControlFlowAsync(file, line, column, scope, detailLevel, maxItems);
+    }
+
+    [McpServerTool]
+    [Description("Return a compact operation tree for the syntax node at a file position. Disabled by default.")]
+    public Task<ToolResponse<FlowAnalysisResult>> cs_operation_tree(
+        string file,
+        int line,
+        int column,
+        ToolScope? scope = null,
+        string detailLevel = "normal",
+        int maxItems = 50)
+    {
+        return advancedSemanticService.OperationTreeAsync(file, line, column, scope, detailLevel, maxItems);
+    }
+
+    [McpServerTool]
+    [Description("Return compiler diagnostics while analyzer execution remains opt-in. Disabled by default.")]
+    public Task<ToolResponse<SemanticDiagnosticResult>> cs_run_analyzers(
+        ToolScope? scope = null,
+        string? path = null,
+        string severityAtLeast = "warning",
+        string detailLevel = "normal",
+        int maxItems = 100)
+    {
+        return advancedSemanticService.RunAnalyzersAsync(scope, path, severityAtLeast, detailLevel, maxItems);
+    }
+
+    [McpServerTool]
+    [Description("Return diagnostic-backed code-fix preview candidates without applying changes. Disabled by default.")]
+    public Task<ToolResponse<CodeFixPreviewResult>> cs_code_fix_preview(
+        string? diagnosticId = null,
+        string? file = null,
+        ToolScope? scope = null,
+        string detailLevel = "normal",
+        int maxItems = 50)
+    {
+        return advancedSemanticService.CodeFixPreviewAsync(diagnosticId, file, scope, detailLevel, maxItems);
+    }
+
+    [McpServerTool]
+    [Description("Return current public API inventory for the selected solution. Disabled by default.")]
+    public Task<ToolResponse<PublicApiDiffResult>> cs_public_api_diff(
+        ToolScope? scope = null,
+        string detailLevel = "normal",
+        int maxItems = 100)
+    {
+        return advancedSemanticService.PublicApiDiffAsync(scope, detailLevel, maxItems);
+    }
+
+    [McpServerTool]
+    [Description("Return low-confidence private symbols with no semantic references. Disabled by default.")]
+    public Task<ToolResponse<DeadCodeCandidateResult>> cs_dead_code_candidates(
+        ToolScope? scope = null,
+        string detailLevel = "normal",
+        int maxItems = 50)
+    {
+        return advancedSemanticService.DeadCodeCandidatesAsync(scope, detailLevel, maxItems);
+    }
+
+    [McpServerTool]
+    [Description("Search generated-looking C# files that are excluded from default cold indexing. Disabled by default.")]
+    public ToolResponse<SymbolSearchResult> cs_generated_code_search(
+        string query = "",
+        ToolScope? scope = null,
+        string detailLevel = "normal",
+        int maxItems = 50)
+    {
+        return advancedSemanticService.GeneratedCodeSearch(query, scope, detailLevel, maxItems);
     }
 }

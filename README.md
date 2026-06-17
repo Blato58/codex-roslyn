@@ -1,6 +1,6 @@
 # CodexRoslyn
 
-CodexRoslyn is a local-first Roslyn MCP server for C#/.NET repositories. It gives Codex compact semantic tools for repository overview, solution selection, symbol search, navigation, references, diagnostics, impact analysis, and read-only refactor previews.
+CodexRoslyn is a local-first Roslyn MCP server for C#/.NET repositories. It gives Codex compact semantic tools for repository overview, solution selection, symbol search, navigation, references, diagnostics, impact analysis, context packing, and safe refactor previews.
 
 The project is distributed as the `dotnet-roslyn-mcp` CLI and as a Codex plugin bundle under `plugin/`.
 
@@ -12,9 +12,11 @@ The project is distributed as the `dotnet-roslyn-mcp` CLI and as a Codex plugin 
 - Compact `ToolResponse<T>` payloads designed for agent use.
 - Stdio MCP serving for plugin use.
 - Loopback Streamable HTTP serving for daemon-style use.
+- Compact context packs, diagnostics summaries, flow/call graph slices, public API inventory, generated-code search, and dead-code candidates.
+- Applyable refactor previews backed by an in-process edit cache.
 - Codex plugin skills and hooks that steer C# work toward semantic tools before broad text search.
 
-No exposed tool mutates source files by default. Refactoring support is preview-only through `cs_refactor_preview`.
+No exposed tool mutates source files by default in the bundled plugin configs. `cs_apply_workspace_edit` exists only for explicit opt-in configs and applies cached previews after repo, solution, and file-hash checks.
 
 ## Repository Layout
 
@@ -100,19 +102,38 @@ Warm semantic tools load Roslyn only after solution selection or an unambiguous 
 - `cs_type_hierarchy`
 - `cs_callers`
 - `cs_diagnostics`
+- `cs_diagnostics_summary`
 - `cs_change_impact`
 - `cs_test_impact`
 - `cs_refactor_preview`
+- `cs_context_pack`
+
+Advanced or mutating tools are exposed by the server but intentionally omitted from default plugin allow lists:
+
+- `cs_apply_workspace_edit`
+- `cs_full_call_graph`
+- `cs_data_flow`
+- `cs_control_flow`
+- `cs_operation_tree`
+- `cs_run_analyzers`
+- `cs_code_fix_preview`
+- `cs_public_api_diff`
+- `cs_dead_code_candidates`
+- `cs_generated_code_search`
 
 Tool methods live in `src/Codex.Roslyn.Mcp/Tools/RepoTools.cs`. Business logic belongs in `Core`, `Index`, or `Workspaces`, not in MCP method bodies.
 
 ## Plugin Usage
 
-The plugin manifest is `plugin/.codex-plugin/plugin.json`. The bundled MCP config in `plugin/.mcp.json` expects an installed `dotnet-roslyn-mcp` command and starts:
+For the full setup flow, including installing the required `dotnet-roslyn-mcp` .NET tool, see [docs/INSTALLATION.md](docs/INSTALLATION.md).
+
+The plugin manifest is `plugin/.codex-plugin/plugin.json`. The bundled MCP config in `plugin/.mcp.json` starts MCP through the plugin launcher:
 
 ```text
-dotnet-roslyn-mcp serve --stdio
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./scripts/roslyn-mcp.ps1 serve --stdio
 ```
+
+On Windows, the launcher installs the global `dotnet-roslyn-mcp` .NET tool if it is missing before it starts MCP.
 
 The plugin also includes:
 
@@ -120,8 +141,9 @@ The plugin also includes:
 - `plugin/skills/csharp-safe-refactor/SKILL.md`
 - `plugin/skills/dotnet-test-impact/SKILL.md`
 - `plugin/hooks/hooks.json`
+- `plugin/scripts/roslyn-mcp.ps1`
 
-For direct Codex config examples, see `plugin/config/roslyn.config.toml` for stdio/plugin policy and `plugin/config/roslyn.daemon.config.toml` for loopback HTTP daemon usage.
+For direct Codex config examples, see `plugin/config/roslyn.config.toml` for stdio/plugin policy, `plugin/config/roslyn.daemon.config.toml` for loopback HTTP daemon usage, and `plugin/config/roslyn.advanced-opt-in.config.toml` for prompt-approved advanced/apply tools.
 
 ## HTTP Mode
 
@@ -149,6 +171,7 @@ Generated files ending in `.g.cs`, `.generated.cs`, or `.designer.cs` are exclud
 
 - Keep DTOs and tool responses stable and compact.
 - Keep repo-relative paths normalized to forward slashes in indexes and responses.
+- Keep default plugin configs read-only; put mutation-capable tools only in explicit opt-in samples.
 - Do not auto-run restore or build from MCP tool handling; return actionable status instead.
 - Update focused xUnit tests when changing scanner, index, semantic query, tool contract, or transport behavior.
-- Treat `SPECIFICATION.md` and `RESEARCH.md` as design/reference documents. Verify current behavior against source before documenting it as implemented.
+- Treat `docs/SPECIFICATION.md` and `docs/RESEARCH.md` as design/reference documents. Verify current behavior against source before documenting it as implemented.

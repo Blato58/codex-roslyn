@@ -916,6 +916,8 @@ These are the default tools because they cover the highest-frequency 90th percen
 | `cs_type_hierarchy`       |     Yes | Base/derived/interface hierarchy                     | `SymbolFinder` + semantic model         |
 | `cs_callers`              |     Yes | One-hop caller lookup                                | `SymbolFinder.FindCallersAsync`         |
 | `cs_diagnostics`          |     Yes | Compiler diagnostics for selected scope              | `Compilation`, `SemanticModel`          |
+| `cs_diagnostics_summary`  |     Yes | Compact diagnostic counts and top diagnostics        | `Compilation`, `SemanticModel`          |
+| `cs_context_pack`         |     Yes | Compact task context from symbols/files/diagnostics  | SQLite + Roslyn                         |
 | `cs_change_impact`        |     Yes | Changed symbols/files and impacted areas             | Semantic graph + git diff               |
 | `cs_test_impact`          |     Yes | Likely affected tests                                | Naming heuristics + reference graph     |
 | `cs_refactor_preview`     |     Yes | Rename/move/extract preview, no write                | Roslyn refactoring APIs                 |
@@ -1210,11 +1212,9 @@ Codex plugins require `.codex-plugin/plugin.json` and can point to `skills`, `ho
 
 ```json
 {
-  "mcp_servers": {
-    "roslyn": {
-      "command": "dotnet-roslyn-mcp",
-      "args": ["serve", "--stdio"]
-    }
+  "roslyn": {
+    "command": "dotnet-roslyn-mcp",
+    "args": ["serve", "--stdio"]
   }
 }
 ```
@@ -1458,13 +1458,13 @@ OpenAI’s prompt-caching guidance favors stable repeated prompt prefixes and pl
 
 ### Context pack format
 
-Add a tool:
+Implemented as a default read-only planning tool:
 
 ```text
 cs_context_pack
 ```
 
-Disabled by default for MVP, enabled after the main tools are stable.
+Enabled by default for compact planning. It must stay capped and must not emit broad source dumps.
 
 Request:
 
