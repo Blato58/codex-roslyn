@@ -2,7 +2,7 @@
 
 CodexRoslyn is a local-first Roslyn MCP server for C#/.NET repositories. It gives Codex compact semantic tools for repository overview, solution selection, symbol search, navigation, references, diagnostics, impact analysis, context packing, and safe refactor previews.
 
-The project is distributed as the `Codex.Roslyn.Mcp.Tool` .NET tool, which installs the `dotnet-roslyn-mcp` CLI command, and as a Codex plugin bundle under `plugin/`.
+The project is distributed as the `Blato58.RoslynMcp` .NET tool, which installs the `dotnet-roslyn-mcp` CLI command, and as a Codex plugin bundle under `plugin/`.
 
 ## Current Capabilities
 
@@ -125,7 +125,7 @@ Tool methods live in `src/Codex.Roslyn.Mcp/Tools/RepoTools.cs`. Business logic b
 
 ## Plugin Usage
 
-For the full setup flow, including installing the required `Codex.Roslyn.Mcp.Tool` .NET tool, see [docs/INSTALLATION.md](docs/INSTALLATION.md).
+For the full setup flow, including installing the required `Blato58.RoslynMcp` .NET tool, see [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
 The plugin manifest is `plugin/.codex-plugin/plugin.json`. The bundled MCP config in `plugin/.mcp.json` starts MCP through the plugin launcher:
 
@@ -133,7 +133,7 @@ The plugin manifest is `plugin/.codex-plugin/plugin.json`. The bundled MCP confi
 powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./scripts/roslyn-mcp.ps1 serve --stdio
 ```
 
-On Windows, the launcher installs the global `Codex.Roslyn.Mcp.Tool` .NET tool if `dotnet-roslyn-mcp` is missing before it starts MCP.
+On Windows, the launcher installs the global `Blato58.RoslynMcp` .NET tool if `dotnet-roslyn-mcp` is missing before it starts MCP.
 
 The plugin also includes:
 

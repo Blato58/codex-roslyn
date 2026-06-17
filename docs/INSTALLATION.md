@@ -24,13 +24,13 @@ dotnet --version
 If the package is available from your configured NuGet sources, install it directly:
 
 ```powershell
-dotnet tool install -g Codex.Roslyn.Mcp.Tool
+dotnet tool install -g Blato58.RoslynMcp
 ```
 
 If you already have it installed:
 
 ```powershell
-dotnet tool update -g Codex.Roslyn.Mcp.Tool
+dotnet tool update -g Blato58.RoslynMcp
 ```
 
 For local development from this repository, pack and install from a temporary local package source:
@@ -39,13 +39,13 @@ For local development from this repository, pack and install from a temporary lo
 $packageSource = Join-Path $env:TEMP "CodexRoslynPackages"
 New-Item -ItemType Directory -Force $packageSource | Out-Null
 dotnet pack src/Codex.Roslyn.Cli/Codex.Roslyn.Cli.csproj -c Release -o $packageSource
-dotnet tool install -g Codex.Roslyn.Mcp.Tool --add-source $packageSource
+dotnet tool install -g Blato58.RoslynMcp --add-source $packageSource
 ```
 
 If the tool is already installed from an older local package:
 
 ```powershell
-dotnet tool update -g Codex.Roslyn.Mcp.Tool --add-source $packageSource
+dotnet tool update -g Blato58.RoslynMcp --add-source $packageSource
 ```
 
 Verify the command:
@@ -159,7 +159,7 @@ $packageSource = Join-Path $env:TEMP "CodexRoslynPackages"
 Remove-Item $packageSource -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $packageSource | Out-Null
 dotnet pack src/Codex.Roslyn.Cli/Codex.Roslyn.Cli.csproj -c Release -o $packageSource
-dotnet tool update -g Codex.Roslyn.Mcp.Tool --add-source $packageSource
+dotnet tool update -g Blato58.RoslynMcp --add-source $packageSource
 ```
 
 If the package was not installed before, use `dotnet tool install` instead of `dotnet tool update`.
@@ -169,7 +169,7 @@ If the package was not installed before, use `dotnet tool install` instead of `d
 Uninstall the .NET tool:
 
 ```powershell
-dotnet tool uninstall -g Codex.Roslyn.Mcp.Tool
+dotnet tool uninstall -g Blato58.RoslynMcp
 ```
 
 Then uninstall or disable the plugin from Codex.
