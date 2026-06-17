@@ -1192,7 +1192,7 @@ profile: full
 ```json
 {
   "name": "dotnet-semantic-tools",
-  "version": "0.1.0-preview.20260617+codex.20260617002835",
+  "version": "0.1.0-preview.20260617+codex.20260617021314",
   "description": "Roslyn semantic navigation, diagnostics, impact analysis, and safe refactor previews for C#/.NET repositories.",
   "author": {
     "name": "CodexRoslyn contributors",
