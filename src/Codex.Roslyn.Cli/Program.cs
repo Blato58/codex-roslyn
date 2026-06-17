@@ -143,7 +143,6 @@ internal static class CliProgram
             hookSpecificOutput = new
             {
                 hookEventName = "PreToolUse",
-                permissionDecision = "allow",
                 additionalContext = result.AdditionalContext
             }
         });
