@@ -1,6 +1,6 @@
 ---
 name: csharp-semantic-navigation
-description: Use for C#/.NET code navigation, symbol lookup, go-to-definition, references, implementations, type hierarchy, callers, diagnostics, and compact repository overview. Prefer Roslyn MCP tools before grep or raw file reads.
+description: Use for C#/.NET repository inspection, find usages, find references, go to definition, symbol lookup, implementations, diagnostics, compile errors, and code navigation. Prefer Roslyn MCP tools before grep or raw file reads.
 ---
 
 # C# semantic navigation

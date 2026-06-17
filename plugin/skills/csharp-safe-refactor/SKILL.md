@@ -1,6 +1,6 @@
 ---
 name: csharp-safe-refactor
-description: Use for safe C#/.NET rename, move type, extract interface, change signature planning, and refactor impact review. Always call Roslyn refactor preview before editing files.
+description: Use for C#/.NET rename, move type, change signature, organize usings, extract interface, refactor planning, and refactor impact review. Always call Roslyn refactor preview before editing files.
 ---
 
 # C# safe refactoring

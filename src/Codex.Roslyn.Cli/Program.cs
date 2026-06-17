@@ -128,7 +128,7 @@ internal static class CliProgram
 
     private static int RunSessionContext()
     {
-        Console.WriteLine("C#/.NET semantic tooling is available. For C# navigation, references, implementations, type hierarchy, diagnostics, impact analysis, test selection, and refactor planning, use the Roslyn MCP tools before broad grep or raw file reads. Start with cs_repo_overview. In multi-solution repos, select a solution with cs_solution_list/cs_solution_select. Use compact detail first. For validation, call cs_test_impact and prefer the returned dotnet test command before inventing a broad command.");
+        Console.WriteLine("C#/.NET semantic tooling is available. For C# code tasks, use Roslyn MCP tools before broad grep: find usages, find references, go to definition, implementations, diagnostics, compile errors, test impact, rename, and refactor planning. Start with cs_repo_overview. In multi-solution repos, select a solution with cs_solution_list/cs_solution_select. Use compact detail first. For validation, call cs_test_impact and prefer the returned dotnet test command before inventing a broad command.");
         return 0;
     }
 

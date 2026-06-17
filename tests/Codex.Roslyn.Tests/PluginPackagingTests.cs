@@ -24,6 +24,32 @@ public sealed class PluginPackagingTests
     }
 
     [Fact]
+    public void PluginManifest_DefaultPromptContainsPracticalTriggerPhrases()
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(RepoPath("plugin", ".codex-plugin", "plugin.json")));
+        var root = document.RootElement;
+        var pluginInterface = root.GetProperty("interface");
+        var text = string.Join(
+            " ",
+            root.GetProperty("description").GetString(),
+            pluginInterface.GetProperty("shortDescription").GetString(),
+            pluginInterface.GetProperty("longDescription").GetString(),
+            string.Join(" ", pluginInterface.GetProperty("defaultPrompt").EnumerateArray().Select(item => item.GetString())));
+
+        Assert.Contains("find usages", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("find references", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("go to definition", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("implementations", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("diagnostics", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("compile errors", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("test impact", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("rename", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("refactor", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("C#/.NET", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Roslyn", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void HooksFile_DeclaresSessionStartAndWarningOnlyPreToolUse()
     {
         using var document = JsonDocument.Parse(File.ReadAllText(RepoPath("plugin", "hooks", "hooks.json")));
@@ -65,6 +91,59 @@ public sealed class PluginPackagingTests
         Assert.Contains("--stdio", args);
         Assert.Equal(".", roslynServer.GetProperty("cwd").GetString());
         Assert.True(roslynServer.GetProperty("startup_timeout_sec").GetInt32() >= 60);
+    }
+
+    [Fact]
+    public void McpConfig_EnablesOnlyCoreReadOnlyToolsByDefault()
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(RepoPath("plugin", ".mcp.json")));
+        var roslynServer = document.RootElement
+            .GetProperty("mcpServers")
+            .GetProperty("roslyn");
+        var enabledTools = roslynServer
+            .GetProperty("enabled_tools")
+            .EnumerateArray()
+            .Select(tool => tool.GetString())
+            .ToArray();
+
+        Assert.True(roslynServer.GetProperty("tool_timeout_sec").GetInt32() >= 60);
+        Assert.Contains("cs_repo_overview", enabledTools);
+        Assert.Contains("cs_solution_list", enabledTools);
+        Assert.Contains("cs_solution_select", enabledTools);
+        Assert.Contains("cs_index_status", enabledTools);
+        Assert.Contains("cs_symbol_search", enabledTools);
+        Assert.Contains("cs_document_outline", enabledTools);
+        Assert.Contains("cs_symbol_at", enabledTools);
+        Assert.Contains("cs_find_references", enabledTools);
+        Assert.Contains("cs_find_implementations", enabledTools);
+        Assert.Contains("cs_type_hierarchy", enabledTools);
+        Assert.Contains("cs_callers", enabledTools);
+        Assert.Contains("cs_diagnostics", enabledTools);
+        Assert.Contains("cs_diagnostics_summary", enabledTools);
+        Assert.Contains("cs_change_impact", enabledTools);
+        Assert.Contains("cs_test_impact", enabledTools);
+        Assert.Contains("cs_refactor_preview", enabledTools);
+        Assert.Contains("cs_context_pack", enabledTools);
+        Assert.DoesNotContain("cs_apply_workspace_edit", enabledTools);
+        Assert.DoesNotContain("cs_full_call_graph", enabledTools);
+        Assert.DoesNotContain("cs_data_flow", enabledTools);
+        Assert.DoesNotContain("cs_code_fix_preview", enabledTools);
+    }
+
+    [Theory]
+    [InlineData("plugin", "skills", "csharp-semantic-navigation", "SKILL.md", "find usages")]
+    [InlineData("plugin", "skills", "csharp-semantic-navigation", "SKILL.md", "go to definition")]
+    [InlineData("plugin", "skills", "csharp-semantic-navigation", "SKILL.md", "compile errors")]
+    [InlineData("plugin", "skills", "csharp-safe-refactor", "SKILL.md", "rename")]
+    [InlineData("plugin", "skills", "csharp-safe-refactor", "SKILL.md", "change signature")]
+    [InlineData("plugin", "skills", "csharp-safe-refactor", "SKILL.md", "organize usings")]
+    [InlineData("plugin", "skills", "dotnet-test-impact", "SKILL.md", "targeted dotnet test")]
+    [InlineData("plugin", "skills", "dotnet-test-impact", "SKILL.md", "test impact")]
+    public void SkillDescriptions_PreserveImplicitTriggerWords(string first, string second, string third, string fourth, string trigger)
+    {
+        var text = File.ReadAllText(RepoPath(first, second, third, fourth));
+
+        Assert.Contains(trigger, text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]

@@ -1,6 +1,6 @@
 ---
 name: dotnet-test-impact
-description: Use for selecting impacted .NET/C# tests from changed files, changed symbols, references, callers, diagnostics, project shape, and naming conventions.
+description: Use after C#/.NET code changes or when choosing targeted dotnet test commands, test impact, affected tests, changed symbols, references, callers, diagnostics, and project shape.
 ---
 
 # .NET test impact

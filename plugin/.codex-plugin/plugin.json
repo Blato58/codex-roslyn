@@ -1,7 +1,7 @@
 {
   "name": "dotnet-semantic-tools",
   "version": "0.1.0-preview.20260617+codex.20260617021314",
-  "description": "Roslyn semantic navigation, diagnostics, impact analysis, and safe refactor previews for C#/.NET repositories.",
+  "description": "Use Roslyn MCP tools for C#/.NET find usages, find references, go to definition, implementations, diagnostics, compile errors, test impact, rename, and refactor planning.",
   "author": {
     "name": "CodexRoslyn contributors",
     "url": "https://github.com/Blato58/codex-roslyn"
@@ -22,8 +22,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Dotnet Semantic Tools",
-    "shortDescription": "Roslyn semantic tools for C# and .NET repositories.",
-    "longDescription": "Adds local-first Roslyn MCP tools for repository overview, symbol navigation, references, diagnostics, impact analysis, context packing, and safe refactor previews.",
+    "shortDescription": "Roslyn tools for C#/.NET usages, references, diagnostics, tests, and refactors.",
+    "longDescription": "Adds local-first Roslyn MCP tools for C#/.NET repository overview, find usages, find references, go to definition, implementations, diagnostics, compile errors, test impact, context packing, rename, and safe refactor previews.",
     "developerName": "CodexRoslyn contributors",
     "category": "Productivity",
     "capabilities": [
@@ -31,8 +31,8 @@
       "Read"
     ],
     "defaultPrompt": [
-      "Use Roslyn semantic tools for C#/.NET navigation, references, diagnostics, impact analysis, and refactor planning before raw text search.",
-      "Prefer compact semantic summaries first. Request source only when an edit requires it."
+      "For C#/.NET tasks, use Roslyn MCP tools before broad grep: find usages, find references, go to definition, implementations, diagnostics, compile errors, test impact, rename, and refactor planning.",
+      "Start with cs_repo_overview, keep results compact, and request source only when an edit requires exact code."
     ]
   }
 }

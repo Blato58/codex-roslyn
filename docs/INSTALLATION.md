@@ -81,11 +81,23 @@ Install or enable the plugin from the Codex plugin directory or your local marke
 
 1. Restart Codex.
 2. Start a new thread.
-3. Ask Codex to use the `dotnet-semantic-tools` plugin or one of its bundled skills.
+3. Start with ordinary C# prompts such as "find references to WorkspaceManager" or "what tests cover this C# change"; Codex should choose the plugin without requiring an explicit plugin mention.
 
 ## Verify MCP Availability
 
-In a C# repository, ask Codex to inspect the repository with Roslyn semantic tools. The first tool should be:
+In a C# repository, ask Codex a natural code-navigation question:
+
+```text
+Find references to WorkspaceManager and summarize the callers.
+```
+
+For test selection, ask:
+
+```text
+What tests cover this C# change?
+```
+
+For either prompt, the first tool should usually be:
 
 ```text
 cs_repo_overview

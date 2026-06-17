@@ -13,7 +13,27 @@
         "--stdio"
       ],
       "cwd": ".",
-      "startup_timeout_sec": 120
+      "startup_timeout_sec": 120,
+      "tool_timeout_sec": 60,
+      "enabled_tools": [
+        "cs_repo_overview",
+        "cs_solution_list",
+        "cs_solution_select",
+        "cs_index_status",
+        "cs_symbol_search",
+        "cs_document_outline",
+        "cs_symbol_at",
+        "cs_find_references",
+        "cs_find_implementations",
+        "cs_type_hierarchy",
+        "cs_callers",
+        "cs_diagnostics",
+        "cs_diagnostics_summary",
+        "cs_change_impact",
+        "cs_test_impact",
+        "cs_refactor_preview",
+        "cs_context_pack"
+      ]
     }
   }
 }

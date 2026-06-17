@@ -27,7 +27,7 @@ public sealed partial class BashGuardService
         if (IsBroadSymbolSearch(command))
         {
             return new BashGuardResult(
-                "For C# symbol lookup, prefer cs_symbol_search before broad shell search. Use rg only after semantic lookup is insufficient or exact source context is needed.");
+                "For C# symbol lookup, find usages, or find references, prefer cs_symbol_search, cs_symbol_at, or cs_find_references before broad shell search. Use shell search only after semantic lookup is insufficient or exact source context is needed.");
         }
 
         if (IsBroadDotnetTest(command))
@@ -104,13 +104,14 @@ public sealed partial class BashGuardService
         var normalized = command.Trim();
         return CatFindCsRegex().IsMatch(normalized)
             || FindExecCatCsRegex().IsMatch(normalized)
+            || GetChildItemGetContentCsRegex().IsMatch(normalized)
             || RgAllCsRegex().IsMatch(normalized);
     }
 
     private static bool IsBroadSymbolSearch(string command)
     {
         var normalized = command.Trim();
-        if (!normalized.StartsWith("rg ", StringComparison.OrdinalIgnoreCase))
+        if (!StartsWithBroadSearchTool(normalized))
         {
             return false;
         }
@@ -125,6 +126,14 @@ public sealed partial class BashGuardService
             && !normalized.Contains("-g", StringComparison.OrdinalIgnoreCase)
             && !normalized.Contains("docs/SPECIFICATION.md", StringComparison.OrdinalIgnoreCase)
             && !normalized.Contains("docs/RESEARCH.md", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool StartsWithBroadSearchTool(string command)
+    {
+        return command.StartsWith("rg ", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("grep ", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("Select-String ", StringComparison.OrdinalIgnoreCase)
+            || GetChildItemSelectStringRegex().IsMatch(command);
     }
 
     private static bool IsBroadDotnetTest(string command)
@@ -146,6 +155,12 @@ public sealed partial class BashGuardService
 
     [GeneratedRegex(@"find\s+\.?\s+.*-name\s+['""]?\*\.cs['""]?.*-exec\s+cat\s+\{\}", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex FindExecCatCsRegex();
+
+    [GeneratedRegex(@"Get-ChildItem\b.*(\*\.cs|Filter\s+['""]?\*\.cs|Include\s+['""]?\*\.cs).*?\|\s*Get-Content\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex GetChildItemGetContentCsRegex();
+
+    [GeneratedRegex(@"Get-ChildItem\b.*\|\s*Select-String\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex GetChildItemSelectStringRegex();
 
     [GeneratedRegex(@"rg\s+\.?\s+.*(\*\.cs|'[^']*\.cs'|""[^""]*\.cs"")", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex RgAllCsRegex();
