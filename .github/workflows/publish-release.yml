@@ -1,0 +1,126 @@
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Package version to pack and publish"
+        required: true
+        default: "0.1.0-preview.20260617"
+      tag:
+        description: "GitHub release tag"
+        required: true
+        default: "v0.1.0-preview.20260617"
+      publish_nuget:
+        description: "Push the .nupkg to nuget.org"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+
+    env:
+      CONFIGURATION: Release
+      RELEASE_DIR: artifacts/release
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore CodexRoslyn.slnx
+
+      - name: Build
+        run: dotnet build CodexRoslyn.slnx -c $env:CONFIGURATION --no-restore
+
+      - name: Test
+        run: dotnet test CodexRoslyn.slnx -c $env:CONFIGURATION --no-build
+
+      - name: Pack tool
+        run: >
+          dotnet pack src/Codex.Roslyn.Cli/Codex.Roslyn.Cli.csproj
+          -c $env:CONFIGURATION
+          --no-build
+          -o $env:RELEASE_DIR
+          /p:Version=${{ inputs.version }}
+          /p:PackageVersion=${{ inputs.version }}
+
+      - name: Build plugin archive
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RELEASE_DIR "dotnet-semantic-tools-${{ inputs.version }}.zip"
+          Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path "plugin\*" -DestinationPath $zip -Force
+          Get-ChildItem -LiteralPath $env:RELEASE_DIR
+
+      - name: Verify local tool package
+        shell: pwsh
+        run: |
+          $toolPath = Join-Path $env:RUNNER_TEMP "codex-roslyn-tool"
+          New-Item -ItemType Directory -Force $toolPath | Out-Null
+          dotnet tool install Codex.Roslyn.Mcp.Tool `
+            --tool-path $toolPath `
+            --add-source $env:RELEASE_DIR `
+            --version "${{ inputs.version }}" `
+            --ignore-failed-sources
+          & (Join-Path $toolPath "dotnet-roslyn-mcp.exe") --help
+          & (Join-Path $toolPath "dotnet-roslyn-mcp.exe") doctor --repo .
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-roslyn-${{ inputs.version }}
+          path: |
+            ${{ env.RELEASE_DIR }}/*.nupkg
+            ${{ env.RELEASE_DIR }}/*.zip
+          if-no-files-found: error
+
+      - name: Upload assets to GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $releaseExists = gh release view "${{ inputs.tag }}" --repo "${{ github.repository }}" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create "${{ inputs.tag }}" `
+              --repo "${{ github.repository }}" `
+              --target "${{ github.sha }}" `
+              --title "CodexRoslyn ${{ inputs.version }}" `
+              --notes "Automated release for CodexRoslyn ${{ inputs.version }}." `
+              --prerelease
+          }
+
+          gh release upload "${{ inputs.tag }}" `
+            (Join-Path $env:RELEASE_DIR "Codex.Roslyn.Mcp.Tool.${{ inputs.version }}.nupkg") `
+            (Join-Path $env:RELEASE_DIR "dotnet-semantic-tools-${{ inputs.version }}.zip") `
+            --repo "${{ github.repository }}" `
+            --clobber
+
+      - name: Require NuGet API key
+        if: inputs.publish_nuget
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:NUGET_API_KEY)) {
+            throw "Repository secret NUGET_API_KEY is required to publish to nuget.org."
+          }
+
+      - name: Push package to nuget.org
+        if: inputs.publish_nuget
+        shell: pwsh
+        run: >
+          dotnet nuget push
+          (Join-Path $env:RELEASE_DIR "Codex.Roslyn.Mcp.Tool.${{ inputs.version }}.nupkg")
+          --api-key $env:NUGET_API_KEY
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
