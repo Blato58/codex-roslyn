@@ -18,7 +18,9 @@ public sealed class RefactorPreviewService(
     WorkspaceManager workspaceManager,
     ColdIndexService coldIndexService,
     SemanticSymbolCache symbolCache,
-    WorkspaceEditCache editCache)
+    WorkspaceEditCache editCache,
+    WorkspaceEditOptions workspaceEditOptions,
+    RepoPathService repoPathService)
 {
     public async Task<ToolResponse<RefactorPreviewResult>> PreviewAsync(
         string operation,
@@ -47,6 +49,14 @@ public sealed class RefactorPreviewService(
         string detailLevel = "normal",
         CancellationToken cancellationToken = default)
     {
+        if (!workspaceEditOptions.EnableApply)
+        {
+            return Empty<WorkspaceEditApplyResult>(
+                "disabled",
+                "Workspace edit apply is disabled by default. Start the server with --enable-apply or set CODEX_ROSLYN_ENABLE_APPLY=1 to enable this mutating tool.",
+                detailLevel);
+        }
+
         if (string.IsNullOrWhiteSpace(editId) || !editCache.TryGet(editId, out var edit))
         {
             return Empty<WorkspaceEditApplyResult>("unknown_edit", "Workspace edit was not found in this server process.", detailLevel);
@@ -227,10 +237,15 @@ public sealed class RefactorPreviewService(
             return Empty<RefactorPreviewResult>(loaded.ResponseKind, loaded.Summary, detailLevel, loaded.Warning);
         }
 
-        var document = FindDocument(loaded.Handle!.Solution, loaded.RepoRoot, file);
+        if (!repoPathService.TryNormalizeRepoRelativePath(loaded.RepoRoot, file, out var normalizedFile, out var pathError))
+        {
+            return Empty<RefactorPreviewResult>("file_not_found", pathError, detailLevel);
+        }
+
+        var document = FindDocument(loaded.Handle!.Solution, loaded.RepoRoot, normalizedFile);
         if (document is null)
         {
-            return Empty<RefactorPreviewResult>("error", $"File '{file}' was not found in the selected solution.", detailLevel);
+            return Empty<RefactorPreviewResult>("file_not_found", $"File '{normalizedFile}' was not found in the selected solution.", detailLevel);
         }
 
         var organized = await Formatter.OrganizeImportsAsync(document, cancellationToken);

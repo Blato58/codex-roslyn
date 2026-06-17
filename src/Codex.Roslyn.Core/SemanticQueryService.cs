@@ -13,7 +13,8 @@ public sealed class SemanticQueryService(
     WorkspaceManager workspaceManager,
     ColdIndexService coldIndexService,
     SemanticSymbolIdService symbolIdService,
-    SemanticSymbolCache symbolCache)
+    SemanticSymbolCache symbolCache,
+    RepoPathService repoPathService)
 {
     public async Task<ToolResponse<SemanticSymbolResult>> SymbolAtAsync(
         string file,
@@ -29,11 +30,16 @@ public sealed class SemanticQueryService(
             return Empty<SemanticSymbolResult>(loaded.ResponseKind, loaded.Summary, detailLevel, loaded.Warning);
         }
 
+        if (!repoPathService.TryNormalizeRepoRelativePath(loaded.RepoRoot, file, out var normalizedFile, out var pathError))
+        {
+            return Empty<SemanticSymbolResult>("file_not_found", pathError, detailLevel);
+        }
+
         var handle = loaded.Handle!;
-        var document = FindDocument(handle.Solution, loaded.RepoRoot, file);
+        var document = FindDocument(handle.Solution, loaded.RepoRoot, normalizedFile);
         if (document is null)
         {
-            return Empty<SemanticSymbolResult>("error", $"File '{file}' was not found in the selected solution.", detailLevel);
+            return Empty<SemanticSymbolResult>("file_not_found", $"File '{normalizedFile}' was not found in the selected solution.", detailLevel);
         }
 
         var sourceText = await document.GetTextAsync(cancellationToken);
@@ -250,6 +256,13 @@ public sealed class SemanticQueryService(
             return Empty<SemanticDiagnosticResult>(loaded.ResponseKind, loaded.Summary, detailLevel, loaded.Warning);
         }
 
+        string? normalizedPath = null;
+        if (!string.IsNullOrWhiteSpace(path)
+            && !repoPathService.TryNormalizeRepoRelativePath(loaded.RepoRoot, path, out normalizedPath, out var pathError))
+        {
+            return Empty<SemanticDiagnosticResult>("file_not_found", pathError, detailLevel);
+        }
+
         var minSeverity = ParseSeverity(severityAtLeast);
         var diagnostics = new List<SemanticDiagnosticResult>();
         foreach (var project in loaded.Handle!.Solution.Projects)
@@ -269,10 +282,10 @@ public sealed class SemanticQueryService(
 
                 var lineSpan = diagnostic.Location.IsInSource ? diagnostic.Location.GetLineSpan() : default;
                 var relativePath = diagnostic.Location.IsInSource
-                    ? Path.GetRelativePath(loaded.RepoRoot, lineSpan.Path).Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/')
+                    ? repoPathService.TryNormalizeRepoRelativePath(loaded.RepoRoot, lineSpan.Path, out var diagnosticPath, out _) ? diagnosticPath : null
                     : null;
-                if (!string.IsNullOrWhiteSpace(path)
-                    && !string.Equals(relativePath, NormalizePath(path), StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrWhiteSpace(normalizedPath)
+                    && !string.Equals(relativePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -406,7 +419,7 @@ public sealed class SemanticQueryService(
 
     private static Document? FindDocument(Solution solution, string repoRoot, string file)
     {
-        var normalized = NormalizePath(file);
+        var normalized = file.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');
         return solution.Projects
             .SelectMany(project => project.Documents)
             .FirstOrDefault(document =>
@@ -416,8 +429,10 @@ public sealed class SemanticQueryService(
                     return false;
                 }
 
-                var relative = Path.GetRelativePath(repoRoot, document.FilePath);
-                return string.Equals(NormalizePath(relative), normalized, StringComparison.OrdinalIgnoreCase);
+                var relative = Path.GetRelativePath(repoRoot, document.FilePath)
+                    .Replace(Path.DirectorySeparatorChar, '/')
+                    .Replace(Path.AltDirectorySeparatorChar, '/');
+                return string.Equals(relative, normalized, StringComparison.OrdinalIgnoreCase);
             });
     }
 

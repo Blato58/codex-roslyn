@@ -90,6 +90,12 @@ public sealed class ColdIndexService(
         return indexDatabase.GetDocumentOutline(indexPathProvider.GetIndexPath(identity), file, maxItems);
     }
 
+    public bool ContainsFile(string repoRoot, string file)
+    {
+        var identity = repoIdentityService.Create(repoRoot);
+        return indexDatabase.ContainsFile(indexPathProvider.GetIndexPath(identity), file);
+    }
+
     public void RecordSemanticSymbol(string repoRoot, SemanticSymbolResult symbol)
     {
         var identity = repoIdentityService.Create(repoRoot);

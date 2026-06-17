@@ -106,6 +106,8 @@ cs_refactor_preview
 
 The server also exposes advanced tools such as `cs_full_call_graph`, `cs_data_flow`, `cs_code_fix_preview`, and `cs_public_api_diff`, plus the mutating `cs_apply_workspace_edit`. These are disabled by the default plugin config. Use `plugin/config/roslyn.advanced-opt-in.config.toml` only when prompt-approved advanced/apply tools are intended.
 
+`cs_apply_workspace_edit` also has a server-side safety gate. Exposing the tool is not enough: start `dotnet-roslyn-mcp serve` with `--enable-apply` or set `CODEX_ROSLYN_ENABLE_APPLY=1` for the server process. Without that explicit opt-in, the tool returns `disabled` and does not mutate files.
+
 You can also verify the CLI outside Codex:
 
 ```powershell

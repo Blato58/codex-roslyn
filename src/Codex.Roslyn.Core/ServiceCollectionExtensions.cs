@@ -9,6 +9,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddCodexRoslynServices(this IServiceCollection services)
     {
         services.AddSingleton<RepoIdentityService>();
+        services.AddSingleton(WorkspaceEditOptions.FromEnvironment());
         services.AddSingleton<IndexPathProvider>();
         services.AddSingleton<FileHasher>();
         services.AddSingleton<RepoScanner>();
@@ -16,6 +17,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IndexDatabase>();
         services.AddSingleton<ColdIndexService>();
         services.AddSingleton<RepoRootResolver>();
+        services.AddSingleton<RepoPathService>();
         services.AddSingleton<SolutionDiscoveryService>();
         services.AddSingleton<RepoOverviewService>();
         services.AddSingleton<IndexStatusService>();

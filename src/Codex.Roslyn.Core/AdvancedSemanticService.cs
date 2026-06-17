@@ -16,7 +16,8 @@ public sealed class AdvancedSemanticService(
     ColdIndexService coldIndexService,
     SemanticSymbolCache symbolCache,
     SemanticSymbolIdService symbolIdService,
-    ImpactAnalysisService impactAnalysisService)
+    ImpactAnalysisService impactAnalysisService,
+    RepoPathService repoPathService)
 {
     public async Task<ToolResponse<ContextPackResult>> ContextPackAsync(
         IReadOnlyList<string>? symbolIds = null,
@@ -46,16 +47,16 @@ public sealed class AdvancedSemanticService(
             primarySymbols.Add(symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat));
             var sourceLocation = symbol.Locations.FirstOrDefault(location => location.IsInSource);
             var sourcePath = sourceLocation?.SourceTree?.FilePath ?? sourceLocation?.GetLineSpan().Path;
-            if (!string.IsNullOrWhiteSpace(sourcePath))
+            if (repoPathService.TryNormalizeDocumentPath(loaded.RepoRoot, sourcePath, out var sourceRelativePath))
             {
-                selectedFiles.Add(RelativePath(loaded.RepoRoot, sourcePath));
+                selectedFiles.Add(sourceRelativePath);
             }
 
             foreach (var syntaxReference in symbol.DeclaringSyntaxReferences)
             {
-                if (!string.IsNullOrWhiteSpace(syntaxReference.SyntaxTree.FilePath))
+                if (repoPathService.TryNormalizeDocumentPath(loaded.RepoRoot, syntaxReference.SyntaxTree.FilePath, out var declarationPath))
                 {
-                    selectedFiles.Add(RelativePath(loaded.RepoRoot, syntaxReference.SyntaxTree.FilePath));
+                    selectedFiles.Add(declarationPath);
                 }
             }
 
@@ -74,7 +75,10 @@ public sealed class AdvancedSemanticService(
 
         foreach (var file in files ?? [])
         {
-            selectedFiles.Add(NormalizePath(file));
+            if (repoPathService.TryNormalizeDocumentPath(loaded.RepoRoot, file, out var normalizedFile))
+            {
+                selectedFiles.Add(normalizedFile);
+            }
         }
 
         var testSummary = selectedFiles
@@ -148,7 +152,9 @@ public sealed class AdvancedSemanticService(
         var diagnostics = await DiagnosticsCoreAsync(loaded.Handle!.Solution, loaded.RepoRoot, path, severityAtLeast, Math.Clamp(maxItems, 1, 1000), cancellationToken);
         var result = new DiagnosticsSummaryResult
         {
-            Scope = string.IsNullOrWhiteSpace(path) ? loaded.Solution!.Path : NormalizePath(path),
+            Scope = string.IsNullOrWhiteSpace(path)
+                ? loaded.Solution!.Path
+                : repoPathService.TryNormalizeRepoRelativePath(loaded.RepoRoot, path, out var normalizedPath, out _) ? normalizedPath : path,
             ErrorCount = diagnostics.Count(diagnostic => diagnostic.Severity == "error"),
             WarningCount = diagnostics.Count(diagnostic => diagnostic.Severity == "warning"),
             InfoCount = diagnostics.Count(diagnostic => diagnostic.Severity is "info" or "hidden"),
@@ -294,7 +300,7 @@ public sealed class AdvancedSemanticService(
         return new ToolResponse<CodeFixPreviewResult>
         {
             ResultKind = "partial",
-            Summary = $"Found {items.Length} diagnostic-backed code fix candidates.",
+            Summary = $"Found {items.Length} diagnostic candidates only; no applyable code-fix workspace edits were generated.",
             Items = items,
             CacheStatus = new CacheStatus { Index = "hit", Workspace = "warm" },
             TokenPolicy = new TokenPolicy { DetailLevel = detailLevel, EstimatedTokens = 120 + items.Length * 40, Truncated = items.Length >= maxItems },
@@ -330,7 +336,12 @@ public sealed class AdvancedSemanticService(
             });
         }
 
-        return ToolResponse<PublicApiDiffResult>.Ok($"Collected public API inventory for {items.Count} projects.", items, detailLevel, "hit", "warm");
+        return ToolResponse<PublicApiDiffResult>.Ok(
+            $"Collected current public API inventory for {items.Count} projects; no baseline diff was configured.",
+            items,
+            detailLevel,
+            "hit",
+            "warm");
     }
 
     public async Task<ToolResponse<DeadCodeCandidateResult>> DeadCodeCandidatesAsync(ToolScope? scope = null, string detailLevel = "normal", int maxItems = 50, CancellationToken cancellationToken = default)
@@ -344,7 +355,7 @@ public sealed class AdvancedSemanticService(
         var candidates = new List<DeadCodeCandidateResult>();
         foreach (var document in loaded.Handle!.Solution.Projects.SelectMany(project => project.Documents))
         {
-            if (document.FilePath is null || candidates.Count >= maxItems)
+            if (!repoPathService.TryNormalizeDocumentPath(loaded.RepoRoot, document.FilePath, out var documentPath) || candidates.Count >= maxItems)
             {
                 continue;
             }
@@ -389,7 +400,7 @@ public sealed class AdvancedSemanticService(
                     {
                         SymbolId = symbolIdService.CreateSymbolId(loaded.RepoRoot, loaded.Solution!.SolutionId, symbol),
                         DisplayName = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-                        File = RelativePath(loaded.RepoRoot, location.Value.Path),
+                        File = documentPath,
                         Line = location.Value.StartLinePosition.Line + 1,
                         Confidence = "low",
                         Reasons = ["Private symbol has no semantic references in the selected solution."]
@@ -405,9 +416,14 @@ public sealed class AdvancedSemanticService(
     {
         var repoRoot = repoRootResolver.Resolve(scope?.RepoRoot);
         var files = Directory.EnumerateFiles(repoRoot, "*.cs", SearchOption.AllDirectories)
-            .Where(IsGeneratedPath)
-            .Where(path => !IsExcludedPath(repoRoot, path))
-            .Select(path => RelativePath(repoRoot, path))
+            .Where(path => repoPathService.IsGeneratedPath(path))
+            .Where(path => repoPathService.TryNormalizeRepoRelativePath(repoRoot, path, out var relative, out _)
+                && !repoPathService.IsExcludedRelativePath(relative))
+            .Select(path =>
+            {
+                repoPathService.TryNormalizeRepoRelativePath(repoRoot, path, out var relative, out _);
+                return relative;
+            })
             .Where(path => string.IsNullOrWhiteSpace(query) || path.Contains(query, StringComparison.OrdinalIgnoreCase))
             .Take(Math.Clamp(maxItems, 1, 500))
             .Select(path => new SymbolSearchResult
@@ -422,7 +438,13 @@ public sealed class AdvancedSemanticService(
             })
             .ToArray();
 
-        return ToolResponse<SymbolSearchResult>.Ok($"Found {files.Length} generated files.", files, detailLevel, "miss", "cold");
+        return ToolResponse<SymbolSearchResult>.Ok(
+            $"Found {files.Length} generated files by scanning the filesystem; the cold index is not used for this tool.",
+            files,
+            detailLevel,
+            "bypass",
+            "cold",
+            ["Generated code search intentionally bypasses the cold index because generated files are excluded from default indexing."]);
     }
 
     private async Task<ToolResponse<FlowAnalysisResult>> FlowAsync(string file, int line, int column, string kind, ToolScope? scope, string detailLevel, int maxItems, CancellationToken cancellationToken)
@@ -433,10 +455,15 @@ public sealed class AdvancedSemanticService(
             return Empty<FlowAnalysisResult>(loaded.ResponseKind, loaded.Summary, detailLevel, loaded.Warning);
         }
 
-        var document = FindDocument(loaded.Handle!.Solution, loaded.RepoRoot, file);
+        if (!repoPathService.TryNormalizeRepoRelativePath(loaded.RepoRoot, file, out var normalizedFile, out var pathError))
+        {
+            return Empty<FlowAnalysisResult>("file_not_found", pathError, detailLevel);
+        }
+
+        var document = FindDocument(loaded.Handle!.Solution, loaded.RepoRoot, normalizedFile);
         if (document is null)
         {
-            return Empty<FlowAnalysisResult>("error", $"File '{file}' was not found in the selected solution.", detailLevel);
+            return Empty<FlowAnalysisResult>("file_not_found", $"File '{normalizedFile}' was not found in the selected solution.", detailLevel);
         }
 
         var text = await document.GetTextAsync(cancellationToken);
@@ -491,10 +518,10 @@ public sealed class AdvancedSemanticService(
         }
 
         return ToolResponse<FlowAnalysisResult>.Ok(
-            $"{kind} inspected syntax at {NormalizePath(file)}:{line}.",
+            $"{kind} inspected syntax at {normalizedFile}:{line}.",
             [new FlowAnalysisResult
             {
-                File = NormalizePath(file),
+                File = normalizedFile,
                 Line = line,
                 Kind = kind,
                 Reads = reads,
@@ -538,8 +565,15 @@ public sealed class AdvancedSemanticService(
         return new SemanticLoadContext(resolution.RepoRoot, resolution.Solution, loaded.Handle, null, string.Empty, null);
     }
 
-    private static async Task<List<SemanticDiagnosticResult>> DiagnosticsCoreAsync(Solution solution, string repoRoot, string? path, string severityAtLeast, int maxItems, CancellationToken cancellationToken)
+    private async Task<List<SemanticDiagnosticResult>> DiagnosticsCoreAsync(Solution solution, string repoRoot, string? path, string severityAtLeast, int maxItems, CancellationToken cancellationToken)
     {
+        string? normalizedPath = null;
+        if (!string.IsNullOrWhiteSpace(path)
+            && !repoPathService.TryNormalizeRepoRelativePath(repoRoot, path, out normalizedPath, out _))
+        {
+            return [];
+        }
+
         var minSeverity = ParseSeverity(severityAtLeast);
         var diagnostics = new List<SemanticDiagnosticResult>();
         foreach (var project in solution.Projects)
@@ -558,8 +592,11 @@ public sealed class AdvancedSemanticService(
                 }
 
                 var lineSpan = diagnostic.Location.IsInSource ? diagnostic.Location.GetLineSpan() : default;
-                var relativePath = diagnostic.Location.IsInSource ? RelativePath(repoRoot, lineSpan.Path) : null;
-                if (!string.IsNullOrWhiteSpace(path) && !string.Equals(relativePath, NormalizePath(path), StringComparison.OrdinalIgnoreCase))
+                var relativePath = diagnostic.Location.IsInSource
+                    && repoPathService.TryNormalizeRepoRelativePath(repoRoot, lineSpan.Path, out var diagnosticPath, out _)
+                    ? diagnosticPath
+                    : null;
+                if (!string.IsNullOrWhiteSpace(normalizedPath) && !string.Equals(relativePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -583,7 +620,7 @@ public sealed class AdvancedSemanticService(
         return diagnostics;
     }
 
-    private static IEnumerable<string> ReferenceFiles(Solution solution, string repoRoot, IEnumerable<ReferencedSymbol> references)
+    private IEnumerable<string> ReferenceFiles(Solution solution, string repoRoot, IEnumerable<ReferencedSymbol> references)
     {
         foreach (var referencedSymbol in references)
         {
@@ -595,9 +632,9 @@ public sealed class AdvancedSemanticService(
                 }
 
                 var document = solution.GetDocument(location.SourceTree);
-                if (document?.FilePath is not null)
+                if (repoPathService.TryNormalizeDocumentPath(repoRoot, document?.FilePath, out var relativePath))
                 {
-                    yield return RelativePath(repoRoot, document.FilePath);
+                    yield return relativePath;
                 }
             }
         }
@@ -687,12 +724,13 @@ public sealed class AdvancedSemanticService(
         }
     }
 
-    private static Document? FindDocument(Solution solution, string repoRoot, string file)
+    private Document? FindDocument(Solution solution, string repoRoot, string file)
     {
-        var normalized = NormalizePath(file);
+        var normalized = repoPathService.NormalizePath(file);
         return solution.Projects
             .SelectMany(project => project.Documents)
-            .FirstOrDefault(document => document.FilePath is not null && string.Equals(RelativePath(repoRoot, document.FilePath), normalized, StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(document => repoPathService.TryNormalizeRepoRelativePath(repoRoot, document.FilePath ?? string.Empty, out var relativePath, out _)
+                && string.Equals(relativePath, normalized, StringComparison.OrdinalIgnoreCase));
     }
 
     private static DiagnosticSeverity ParseSeverity(string severity)
@@ -720,19 +758,11 @@ public sealed class AdvancedSemanticService(
         };
     }
 
-    private static string NormalizePath(string path)
-    {
-        return path.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');
-    }
-
-    private static string RelativePath(string repoRoot, string path)
-    {
-        return NormalizePath(Path.GetRelativePath(repoRoot, path));
-    }
-
     private static string FirstSegment(string value)
     {
-        return NormalizePath(value).Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? value;
+        return value.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault() ?? value;
     }
 
     private static IReadOnlyList<string> RecommendedNextTools(
@@ -753,29 +783,6 @@ public sealed class AdvancedSemanticService(
         }
 
         return tools.Distinct(StringComparer.Ordinal).ToArray();
-    }
-
-    private static bool IsGeneratedPath(string path)
-    {
-        return path.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
-            || path.EndsWith(".generated.cs", StringComparison.OrdinalIgnoreCase)
-            || path.EndsWith(".designer.cs", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsExcludedPath(string repoRoot, string path)
-    {
-        var relative = RelativePath(repoRoot, path);
-        var segments = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        return segments.Any(segment => segment.Equals("bin", StringComparison.OrdinalIgnoreCase)
-            || segment.Equals("obj", StringComparison.OrdinalIgnoreCase)
-            || segment.Equals(".git", StringComparison.OrdinalIgnoreCase)
-            || segment.Equals(".vs", StringComparison.OrdinalIgnoreCase)
-            || segment.Equals(".idea", StringComparison.OrdinalIgnoreCase)
-            || segment.Equals(".vscode", StringComparison.OrdinalIgnoreCase)
-            || segment.Equals("node_modules", StringComparison.OrdinalIgnoreCase)
-            || segment.Equals("packages", StringComparison.OrdinalIgnoreCase)
-            || segment.Equals("TestResults", StringComparison.OrdinalIgnoreCase)
-            || segment.Equals("coverage", StringComparison.OrdinalIgnoreCase));
     }
 
     private sealed record SemanticLoadContext(

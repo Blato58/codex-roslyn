@@ -104,6 +104,8 @@ public sealed class PluginPackagingTests
         var config = File.ReadAllText(RepoPath("plugin", "config", "roslyn.advanced-opt-in.config.toml"));
 
         Assert.Contains("default_tools_approval_mode = \"prompt\"", config);
+        Assert.Contains("--enable-apply", config);
+        Assert.Contains("CODEX_ROSLYN_ENABLE_APPLY=1", config);
         Assert.Contains("cs_apply_workspace_edit", config);
         Assert.Contains("cs_full_call_graph", config);
         Assert.Contains("cs_code_fix_preview", config);
