@@ -2,7 +2,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>dotnet-roslyn-mcp</AssemblyName>
-    <PackageId>dotnet-roslyn-mcp</PackageId>
+    <PackageId>Codex.Roslyn.Mcp.Tool</PackageId>
     <Version>0.1.0-preview.20260617</Version>
     <PackageVersion>0.1.0-preview.20260617</PackageVersion>
     <Authors>CodexRoslyn contributors</Authors>
