@@ -1225,7 +1225,7 @@ Codex plugins require `.codex-plugin/plugin.json` and can point to `skills`, app
 
 ```json
 {
-  "mcpServers": {
+  "mcp_servers": {
     "roslyn": {
       "command": "powershell",
       "args": [
@@ -1404,7 +1404,7 @@ description: Use for selecting impacted .NET/C# tests from changed files, change
 
 ## 14. Hooks
 
-Use a `SessionStart` hook to add lightweight repo guidance to Codex context. Codex hooks can add context at session start, and `PreToolUse` hooks can intercept Bash, patch, and MCP tool calls, though they should be treated as guardrails rather than a complete security boundary. ([OpenAI Developers][14])
+Use a `SessionStart` hook to add lightweight repo guidance to Codex context. Avoid registering an every-command `PreToolUse` hook in the bundled plugin because it adds overhead to ordinary Codex work. ([OpenAI Developers][14])
 
 `plugin/hooks/hooks.json`:
 
@@ -1420,19 +1420,6 @@ Use a `SessionStart` hook to add lightweight repo guidance to Codex context. Cod
             "command": "dotnet-roslyn-mcp session-context",
             "timeout": 3,
             "statusMessage": "Loading C# semantic tooling context"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "dotnet-roslyn-mcp guard-bash",
-            "timeout": 2,
-            "statusMessage": "Checking whether Roslyn semantic tools should be used"
           }
         ]
       }
@@ -1966,7 +1953,6 @@ Deliver:
 ```text
 final skills
 SessionStart hook
-optional PreToolUse guard
 stable MCP instructions
 plugin-scoped config sample
 AGENTS.md template

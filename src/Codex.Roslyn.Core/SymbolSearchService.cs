@@ -4,7 +4,10 @@ using Codex.Roslyn.Index;
 
 namespace Codex.Roslyn.Core;
 
-public sealed class SymbolSearchService(RepoRootResolver repoRootResolver, ColdIndexService coldIndexService)
+public sealed class SymbolSearchService(
+    RepoRootResolver repoRootResolver,
+    ColdIndexService coldIndexService,
+    IndexBuildService indexBuildService)
 {
     public ToolResponse<SymbolSearchResult> Search(
         string query,
@@ -25,18 +28,8 @@ public sealed class SymbolSearchService(RepoRootResolver repoRootResolver, ColdI
         }
 
         var repoRoot = repoRootResolver.Resolve(scope?.RepoRoot);
-        var status = coldIndexService.GetStatus(repoRoot);
-        if (status.IndexState == "missing")
-        {
-            return new ToolResponse<SymbolSearchResult>
-            {
-                ResultKind = "stale_index",
-                Summary = "Cold index is missing. Run 'dotnet-roslyn-mcp index --repo <path>' first.",
-                CacheStatus = new CacheStatus { Index = "miss", Workspace = "cold" },
-                TokenPolicy = new TokenPolicy { DetailLevel = detailLevel, EstimatedTokens = 60 },
-                Warnings = ["Symbol search requires the cold SQLite index."]
-            };
-        }
+        var recovery = indexBuildService.EnsureFresh(repoRoot);
+        var status = recovery.Status;
 
         var results = coldIndexService.SearchSymbols(repoRoot, query, kind, maxItems);
         var summary = results.Count == 1 ? "Found 1 syntax-only symbol." : $"Found {results.Count} syntax-only symbols.";
@@ -46,6 +39,7 @@ public sealed class SymbolSearchService(RepoRootResolver repoRootResolver, ColdI
             results,
             detailLevel,
             indexStatus: status.IndexState == "fresh" ? "hit" : "stale",
-            workspaceStatus: "cold");
+            workspaceStatus: "cold",
+            warnings: recovery.Warning is null ? null : [recovery.Warning]);
     }
 }

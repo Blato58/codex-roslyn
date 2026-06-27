@@ -7,7 +7,8 @@ namespace Codex.Roslyn.Core;
 public sealed class DocumentOutlineService(
     RepoRootResolver repoRootResolver,
     RepoPathService repoPathService,
-    ColdIndexService coldIndexService)
+    ColdIndexService coldIndexService,
+    IndexBuildService indexBuildService)
 {
     public ToolResponse<DocumentOutlineItem> GetOutline(
         string file,
@@ -27,18 +28,7 @@ public sealed class DocumentOutlineService(
         }
 
         var repoRoot = repoRootResolver.Resolve(scope?.RepoRoot);
-        var status = coldIndexService.GetStatus(repoRoot);
-        if (status.IndexState == "missing")
-        {
-            return new ToolResponse<DocumentOutlineItem>
-            {
-                ResultKind = "stale_index",
-                Summary = "Cold index is missing. Run 'dotnet-roslyn-mcp index --repo <path>' first.",
-                CacheStatus = new CacheStatus { Index = "miss", Workspace = "cold" },
-                TokenPolicy = new TokenPolicy { DetailLevel = detailLevel, EstimatedTokens = 60 },
-                Warnings = ["Document outline requires the cold SQLite index."]
-            };
-        }
+        var initialStatus = coldIndexService.GetStatus(repoRoot);
 
         if (!repoPathService.TryNormalizeRepoRelativePath(repoRoot, file, out var normalizedFile, out var pathError))
         {
@@ -46,10 +36,13 @@ public sealed class DocumentOutlineService(
             {
                 ResultKind = "file_not_found",
                 Summary = pathError,
-                CacheStatus = new CacheStatus { Index = status.IndexState == "fresh" ? "hit" : "stale", Workspace = "cold" },
+                CacheStatus = new CacheStatus { Index = ToCacheIndexStatus(initialStatus.IndexState), Workspace = "cold" },
                 TokenPolicy = new TokenPolicy { DetailLevel = detailLevel, EstimatedTokens = 60 }
             };
         }
+
+        var recovery = indexBuildService.EnsureFresh(repoRoot);
+        var status = recovery.Status;
 
         if (!coldIndexService.ContainsFile(repoRoot, normalizedFile))
         {
@@ -70,6 +63,17 @@ public sealed class DocumentOutlineService(
             results,
             detailLevel,
             indexStatus: status.IndexState == "fresh" ? "hit" : "stale",
-            workspaceStatus: "cold");
+            workspaceStatus: "cold",
+            warnings: recovery.Warning is null ? null : [recovery.Warning]);
+    }
+
+    private static string ToCacheIndexStatus(string indexState)
+    {
+        return indexState switch
+        {
+            "fresh" => "hit",
+            "stale" => "stale",
+            _ => "miss"
+        };
     }
 }

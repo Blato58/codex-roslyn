@@ -8,7 +8,7 @@ public sealed class CliHookOutputTests
     [Fact]
     public void GuardBash_EmitsAdvisoryContextWithoutUnsupportedPermissionDecision()
     {
-        using var process = Process.Start(new ProcessStartInfo("dotnet", "run --project src/Codex.Roslyn.Cli -- guard-bash")
+        using var process = Process.Start(new ProcessStartInfo("dotnet", "run --project src/Codex.Roslyn.Cli --no-build -- guard-bash")
         {
             WorkingDirectory = RepoRoot(),
             RedirectStandardInput = true,

@@ -7,6 +7,7 @@ The project is distributed as the `Blato58.RoslynMcp` .NET tool, which installs 
 ## Current Capabilities
 
 - Cold repository indexing without loading `MSBuildWorkspace`.
+- Automatic cold index recovery for missing or stale local SQLite indexes.
 - SQLite-backed solution discovery, index status, syntax declaration search, and document outlines.
 - Warm Roslyn semantic queries after a solution is selected or unambiguous.
 - Compact `ToolResponse<T>` payloads designed for agent use.
@@ -90,6 +91,7 @@ Cold-path tools answer from scanner/index state and should not load `MSBuildWork
 - `cs_repo_overview`
 - `cs_solution_list`
 - `cs_index_status`
+- `cs_index_build`
 - `cs_symbol_search`
 - `cs_document_outline`
 
@@ -133,7 +135,7 @@ The plugin manifest is `plugin/.codex-plugin/plugin.json`. The bundled MCP confi
 powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./scripts/roslyn-mcp.ps1 serve --stdio
 ```
 
-On Windows, the launcher installs the global `Blato58.RoslynMcp` .NET tool if `dotnet-roslyn-mcp` is missing before it starts MCP.
+On Windows, the launcher requires `dotnet-roslyn-mcp` to be installed. If the command is missing, it prints the required install command and exits without installing anything automatically.
 
 The plugin also includes:
 
@@ -164,6 +166,8 @@ Indexes are stored outside the repository under the OS-local cache root. On Wind
 ```
 
 Use `clear-cache --repo <path>` to remove the cache for a repository.
+
+In Codex, start with `cs_repo_overview`. If the cold index is missing or stale, call `cs_index_build`; `cs_symbol_search` and `cs_document_outline` also rebuild automatically before retrying their lookup.
 
 Generated files ending in `.g.cs`, `.generated.cs`, or `.designer.cs` are excluded by default. The scanner also skips build outputs, IDE folders, `node_modules`, package folders, test results, and coverage output.
 

@@ -5,7 +5,7 @@ CodexRoslyn has two installable pieces:
 1. The `dotnet-roslyn-mcp` .NET tool, which runs the local MCP server.
 2. The Codex plugin bundle under `plugin/`, which provides skills, hooks, and MCP startup configuration.
 
-The plugin starts MCP through `plugin/scripts/roslyn-mcp.ps1`. On Windows, that launcher installs the global `dotnet-roslyn-mcp` .NET tool automatically if it cannot find it, then starts `dotnet-roslyn-mcp serve --stdio`. Installing the tool manually is still useful for development and troubleshooting.
+The plugin starts MCP through `plugin/scripts/roslyn-mcp.ps1`. On Windows, that launcher requires the global `dotnet-roslyn-mcp` .NET tool to be installed. If it cannot find the command, it prints `dotnet tool install -g Blato58.RoslynMcp` and exits without installing anything automatically.
 
 ## Prerequisites
 
@@ -106,6 +106,7 @@ cs_repo_overview
 If the tools are available, Codex should also be able to call:
 
 ```text
+cs_index_build
 cs_symbol_search
 cs_solution_select
 cs_symbol_at
@@ -115,6 +116,8 @@ cs_diagnostics_summary
 cs_context_pack
 cs_refactor_preview
 ```
+
+If `cs_repo_overview` reports a missing or stale cold index, Codex should call `cs_index_build` before symbol search or document outline. `cs_symbol_search` and `cs_document_outline` also rebuild automatically if they encounter a missing or stale index directly.
 
 The server also exposes advanced tools such as `cs_full_call_graph`, `cs_data_flow`, `cs_code_fix_preview`, and `cs_public_api_diff`, plus the mutating `cs_apply_workspace_edit`. These are disabled by the default plugin config. Use `plugin/config/roslyn.advanced-opt-in.config.toml` only when prompt-approved advanced/apply tools are intended.
 

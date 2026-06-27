@@ -3,6 +3,7 @@
 For C#/.NET code tasks, use the Roslyn MCP server before broad text search. This applies to find usages, find references, go to definition, implementations, diagnostics, compile errors, test impact, rename, and refactor planning.
 
 - Start with `cs_repo_overview` to identify solutions and index state.
+- If the cold index is missing or stale, call `cs_index_build` before symbol search or document outline. If a cold tool reports stale or missing index state, rebuild and retry the tool.
 - Use `cs_solution_list` and `cs_solution_select` when a repository has multiple solutions.
 - Use `cs_symbol_search`, `cs_symbol_at`, `cs_find_references`, `cs_find_implementations`, `cs_type_hierarchy`, `cs_callers`, and `cs_diagnostics` before broad grep or raw file reads.
 - Use `cs_document_outline` before reading a whole C# file for structure.

@@ -21,13 +21,13 @@ public sealed partial class BashGuardService
         if (IsBroadSourceDump(command))
         {
             return new BashGuardResult(
-                "C# semantic tooling is available. Avoid broad C# source dumps; start with cs_repo_overview, cs_symbol_search, cs_symbol_at, or cs_find_references and request compact results first.");
+                "C# semantic tooling is available. Avoid broad C# source dumps; start with cs_repo_overview, use cs_index_build if the cold index is missing or stale, then use cs_symbol_search, cs_symbol_at, or cs_find_references with compact results first.");
         }
 
         if (IsBroadSymbolSearch(command))
         {
             return new BashGuardResult(
-                "For C# symbol lookup, find usages, or find references, prefer cs_symbol_search, cs_symbol_at, or cs_find_references before broad shell search. Use shell search only after semantic lookup is insufficient or exact source context is needed.");
+                "For C# symbol lookup, find usages, or find references, prefer cs_symbol_search, cs_symbol_at, or cs_find_references before broad shell search. Start with cs_repo_overview and use cs_index_build when the index is missing or stale. Use shell search only after semantic lookup is insufficient or exact source context is needed.");
         }
 
         if (IsBroadDotnetTest(command))

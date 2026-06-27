@@ -33,6 +33,7 @@ public sealed class McpToolSurfaceTests
                 "cs_find_references",
                 "cs_full_call_graph",
                 "cs_generated_code_search",
+                "cs_index_build",
                 "cs_index_status",
                 "cs_operation_tree",
                 "cs_public_api_diff",

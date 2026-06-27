@@ -29,7 +29,7 @@ public static class McpServerRunner
                 options.ServerInfo = new()
                 {
                     Name = "codex-roslyn",
-                    Version = "0.1.0-preview.20260617"
+                    Version = "0.1.0-preview.20260625"
                 };
                 options.ServerInstructions = Instructions.Text;
             })
@@ -59,7 +59,7 @@ public static class McpServerRunner
                 serverOptions.ServerInfo = new()
                 {
                     Name = "codex-roslyn",
-                    Version = "0.1.0-preview.20260617"
+                    Version = "0.1.0-preview.20260625"
                 };
                 serverOptions.ServerInstructions = Instructions.Text;
             })

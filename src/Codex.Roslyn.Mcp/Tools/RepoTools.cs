@@ -10,6 +10,7 @@ namespace Codex.Roslyn.Mcp.Tools;
 public sealed class RepoTools(
     RepoOverviewService repoOverviewService,
     IndexStatusService indexStatusService,
+    IndexBuildService indexBuildService,
     SymbolSearchService symbolSearchService,
     DocumentOutlineService documentOutlineService,
     SolutionSelectionService solutionSelectionService,
@@ -68,6 +69,16 @@ public sealed class RepoTools(
         string? cursor = null)
     {
         return indexStatusService.GetStatus(scope?.RepoRoot, detailLevel);
+    }
+
+    [McpServerTool]
+    [Description("Build or refresh the cold SQLite index for the current repository without loading MSBuildWorkspace. Writes only CodexRoslyn cache files.")]
+    public ToolResponse<IndexBuildSummary> cs_index_build(
+        ToolScope? scope = null,
+        string detailLevel = "normal",
+        bool includeGenerated = false)
+    {
+        return indexBuildService.Build(scope, detailLevel, includeGenerated);
     }
 
     [McpServerTool]

@@ -3,8 +3,8 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>dotnet-roslyn-mcp</AssemblyName>
     <PackageId>Blato58.RoslynMcp</PackageId>
-    <Version>0.1.0-preview.20260617</Version>
-    <PackageVersion>0.1.0-preview.20260617</PackageVersion>
+    <Version>0.1.0-preview.20260625</Version>
+    <PackageVersion>0.1.0-preview.20260625</PackageVersion>
     <Authors>CodexRoslyn contributors</Authors>
     <Description>Local-first Roslyn MCP server for C#/.NET semantic navigation, diagnostics, impact analysis, and safe refactor previews.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>

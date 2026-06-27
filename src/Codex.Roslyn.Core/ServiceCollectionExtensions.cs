@@ -21,6 +21,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SolutionDiscoveryService>();
         services.AddSingleton<RepoOverviewService>();
         services.AddSingleton<IndexStatusService>();
+        services.AddSingleton<IndexBuildService>();
         services.AddSingleton<SymbolSearchService>();
         services.AddSingleton<DocumentOutlineService>();
         services.AddSingleton<SolutionSelectionService>();

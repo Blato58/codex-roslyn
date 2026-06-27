@@ -8,6 +8,7 @@ description: Use for C#/.NET repository inspection, find usages, find references
 When working in a C# or .NET repository:
 
 - Call `cs_repo_overview` first unless the active solution is already known.
+- If the cold index is missing or stale, call `cs_index_build` before symbol search or document outline. If a cold tool reports stale or missing index state, rebuild and retry the tool.
 - Use `cs_solution_list` or `cs_solution_select` when multiple `.sln` files exist.
 - Use `cs_symbol_search` for names, types, methods, properties, interfaces, records, and namespaces.
 - Use `cs_document_outline` for file-level structure before reading a whole file.

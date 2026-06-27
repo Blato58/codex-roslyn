@@ -12,19 +12,6 @@
           }
         ]
       }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path `$env:PLUGIN_ROOT 'scripts/roslyn-mcp.ps1') guard-bash\"",
-            "timeout": 2,
-            "statusMessage": "Checking whether Roslyn semantic tools should be used"
-          }
-        ]
-      }
     ]
   }
 }

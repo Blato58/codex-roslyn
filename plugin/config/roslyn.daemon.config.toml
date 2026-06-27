@@ -4,6 +4,7 @@ startup_timeout_sec = 1
 tool_timeout_sec = 20
 enabled_tools = [
   "cs_repo_overview",
+  "cs_index_build",
   "cs_symbol_search",
   "cs_symbol_at",
   "cs_find_references",

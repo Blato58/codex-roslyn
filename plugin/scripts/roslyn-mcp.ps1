@@ -39,23 +39,10 @@ if ($ToolArgs.Count -eq 0) {
 
 $toolPath = Get-RoslynMcpCommand
 if ($null -eq $toolPath) {
-    Write-LauncherStatus "dotnet-roslyn-mcp was not found; installing the global .NET tool."
-
-    $installOutput = & dotnet tool install -g Blato58.RoslynMcp 2>&1
-    $installExitCode = $LASTEXITCODE
-    foreach ($line in $installOutput) {
-        [Console]::Error.WriteLine($line)
-    }
-
-    if ($installExitCode -ne 0) {
-        exit $installExitCode
-    }
-
-    $toolPath = Get-RoslynMcpCommand
-    if ($null -eq $toolPath) {
-        Write-LauncherStatus "dotnet-roslyn-mcp installed, but the command could not be resolved."
-        exit 127
-    }
+    Write-LauncherStatus "dotnet-roslyn-mcp was not found."
+    Write-LauncherStatus "Install the required global .NET tool, then retry:"
+    Write-LauncherStatus "dotnet tool install -g Blato58.RoslynMcp"
+    exit 127
 }
 
 & $toolPath @ToolArgs

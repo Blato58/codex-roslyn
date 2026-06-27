@@ -45,12 +45,14 @@ public sealed class PluginPackagingTests
         Assert.Contains("test impact", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("rename", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("refactor", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("cold index", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("cs_index_build", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("C#/.NET", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Roslyn", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void HooksFile_DeclaresSessionStartAndWarningOnlyPreToolUse()
+    public void HooksFile_DeclaresOnlyLightweightSessionStart()
     {
         using var document = JsonDocument.Parse(File.ReadAllText(RepoPath("plugin", "hooks", "hooks.json")));
         var hooks = document.RootElement.GetProperty("hooks");
@@ -59,25 +61,18 @@ public sealed class PluginPackagingTests
             .GetProperty("hooks")[0]
             .GetProperty("command")
             .GetString();
-        var preToolUseCommand = hooks
-            .GetProperty("PreToolUse")[0]
-            .GetProperty("hooks")[0]
-            .GetProperty("command")
-            .GetString();
 
         Assert.Contains("scripts/roslyn-mcp.ps1", sessionStartCommand);
         Assert.Contains("session-context", sessionStartCommand);
-        Assert.Equal("Bash", hooks.GetProperty("PreToolUse")[0].GetProperty("matcher").GetString());
-        Assert.Contains("scripts/roslyn-mcp.ps1", preToolUseCommand);
-        Assert.Contains("guard-bash", preToolUseCommand);
+        Assert.False(hooks.TryGetProperty("PreToolUse", out _));
     }
 
     [Fact]
-    public void McpConfig_UsesSelfInstallingLauncher()
+    public void McpConfig_UsesWrappedServerMapAndLauncher()
     {
         using var document = JsonDocument.Parse(File.ReadAllText(RepoPath("plugin", ".mcp.json")));
         var roslynServer = document.RootElement
-            .GetProperty("mcpServers")
+            .GetProperty("mcp_servers")
             .GetProperty("roslyn");
         var args = roslynServer
             .GetProperty("args")
@@ -94,11 +89,21 @@ public sealed class PluginPackagingTests
     }
 
     [Fact]
+    public void Launcher_PrintsInstallInstructionWithoutInstallingTool()
+    {
+        var script = File.ReadAllText(RepoPath("plugin", "scripts", "roslyn-mcp.ps1"));
+
+        Assert.Contains("dotnet tool install -g Blato58.RoslynMcp", script);
+        Assert.DoesNotContain("& dotnet tool install", script);
+        Assert.Contains("exit 127", script);
+    }
+
+    [Fact]
     public void McpConfig_EnablesOnlyCoreReadOnlyToolsByDefault()
     {
         using var document = JsonDocument.Parse(File.ReadAllText(RepoPath("plugin", ".mcp.json")));
         var roslynServer = document.RootElement
-            .GetProperty("mcpServers")
+            .GetProperty("mcp_servers")
             .GetProperty("roslyn");
         var enabledTools = roslynServer
             .GetProperty("enabled_tools")
@@ -111,6 +116,7 @@ public sealed class PluginPackagingTests
         Assert.Contains("cs_solution_list", enabledTools);
         Assert.Contains("cs_solution_select", enabledTools);
         Assert.Contains("cs_index_status", enabledTools);
+        Assert.Contains("cs_index_build", enabledTools);
         Assert.Contains("cs_symbol_search", enabledTools);
         Assert.Contains("cs_document_outline", enabledTools);
         Assert.Contains("cs_symbol_at", enabledTools);
@@ -167,6 +173,7 @@ public sealed class PluginPackagingTests
 
         Assert.Contains("cs_diagnostics", config);
         Assert.Contains("cs_diagnostics_summary", config);
+        Assert.Contains("cs_index_build", config);
         Assert.Contains("cs_context_pack", config);
         Assert.Contains("cs_change_impact", config);
         Assert.Contains("cs_test_impact", config);
@@ -181,6 +188,7 @@ public sealed class PluginPackagingTests
         var config = File.ReadAllText(RepoPath("plugin", "config", "roslyn.daemon.config.toml"));
 
         Assert.Contains("http://127.0.0.1:38777/mcp", config);
+        Assert.Contains("cs_index_build", config);
         Assert.Contains("cs_refactor_preview", config);
         Assert.DoesNotContain("cs_apply_workspace_edit", config);
     }

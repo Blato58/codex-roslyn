@@ -1,5 +1,5 @@
 {
-  "mcpServers": {
+  "mcp_servers": {
     "roslyn": {
       "command": "powershell",
       "args": [
@@ -20,6 +20,7 @@
         "cs_solution_list",
         "cs_solution_select",
         "cs_index_status",
+        "cs_index_build",
         "cs_symbol_search",
         "cs_document_outline",
         "cs_symbol_at",
