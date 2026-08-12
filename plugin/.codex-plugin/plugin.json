@@ -1,6 +1,6 @@
 {
   "name": "dotnet-semantic-tools",
-  "version": "0.1.0-preview.20260625+codex.20260625110000",
+  "version": "0.1.0-preview.20260812+codex.20260812023042",
   "description": "Use Roslyn MCP tools for C#/.NET find usages, find references, go to definition, implementations, diagnostics, compile errors, test impact, cold index recovery, rename, and refactor planning.",
   "author": {
     "name": "CodexRoslyn contributors",

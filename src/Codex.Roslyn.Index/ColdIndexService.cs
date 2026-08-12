@@ -131,7 +131,19 @@ public sealed class ColdIndexService(
         var identity = repoIdentityService.Create(repoRoot);
         var dirtyPath = GetDirtyPath(identity);
         Directory.CreateDirectory(Path.GetDirectoryName(dirtyPath)!);
-        File.WriteAllText(dirtyPath, DateTimeOffset.UtcNow.ToString("O"));
+
+        try
+        {
+            using var marker = new FileStream(
+                dirtyPath,
+                FileMode.OpenOrCreate,
+                FileAccess.Write,
+                FileShare.ReadWrite | FileShare.Delete);
+        }
+        catch (IOException) when (File.Exists(dirtyPath))
+        {
+            // Another process already created the shared marker.
+        }
     }
 
     private void ClearDirty(RepoIdentity identity)
@@ -139,7 +151,14 @@ public sealed class ColdIndexService(
         var dirtyPath = GetDirtyPath(identity);
         if (File.Exists(dirtyPath))
         {
-            File.Delete(dirtyPath);
+            try
+            {
+                File.Delete(dirtyPath);
+            }
+            catch (IOException) when (File.Exists(dirtyPath))
+            {
+                // A concurrent process still owns the marker; keep the index conservatively stale.
+            }
         }
     }
 

@@ -6,11 +6,11 @@ on:
       version:
         description: "Package version to pack and publish"
         required: true
-        default: "0.1.0-preview.20260617"
+        default: "0.1.0-preview.20260812"
       tag:
         description: "GitHub release tag"
         required: true
-        default: "v0.1.0-preview.20260617"
+        default: "v0.1.0-preview.20260812"
       publish_nuget:
         description: "Push the .nupkg to nuget.org"
         required: true

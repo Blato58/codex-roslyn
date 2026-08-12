@@ -110,6 +110,27 @@ public sealed class ColdIndexIntegrationTests
     }
 
     [Fact]
+    public void MarkDirty_DoesNotThrowWhenAnotherProcessOwnsMarker()
+    {
+        var repo = CreateSampleRepo();
+        using var services = CreateServices(out _);
+        var index = services.GetRequiredService<ColdIndexService>();
+        var build = index.Build(repo);
+        var dirtyPath = Path.Combine(Path.GetDirectoryName(build.CachePath)!, "dirty");
+
+        using var competingWriter = new FileStream(
+            dirtyPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.Read);
+
+        index.MarkDirty(repo);
+        var status = index.GetStatus(repo);
+
+        Assert.Equal("stale", status.IndexState);
+    }
+
+    [Fact]
     public void SymbolSearch_AutoRebuildsStaleIndexBeforeSearching()
     {
         var repo = CreateSampleRepo();

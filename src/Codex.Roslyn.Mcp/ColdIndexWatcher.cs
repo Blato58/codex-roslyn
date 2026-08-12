@@ -26,7 +26,7 @@ public sealed class ColdIndexWatcher(
         watcher.Error += (_, args) =>
         {
             logger.LogWarning(args.GetException(), "File watcher overflow or error; marking cold index dirty.");
-            coldIndexService.MarkDirty(repoRoot);
+            TryMarkDirty(repoRoot);
         };
 
         try
@@ -45,7 +45,19 @@ public sealed class ColdIndexWatcher(
             return;
         }
 
-        coldIndexService.MarkDirty(repoRoot);
+        TryMarkDirty(repoRoot);
+    }
+
+    private void TryMarkDirty(string repoRoot)
+    {
+        try
+        {
+            coldIndexService.MarkDirty(repoRoot);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Could not mark the cold index dirty for {RepoRoot}.", repoRoot);
+        }
     }
 
     private static bool ShouldInvalidate(string path)

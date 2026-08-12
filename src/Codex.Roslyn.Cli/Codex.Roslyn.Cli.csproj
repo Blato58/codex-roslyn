@@ -3,8 +3,8 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>dotnet-roslyn-mcp</AssemblyName>
     <PackageId>Blato58.RoslynMcp</PackageId>
-    <Version>0.1.0-preview.20260625</Version>
-    <PackageVersion>0.1.0-preview.20260625</PackageVersion>
+    <Version>0.1.0-preview.20260812</Version>
+    <PackageVersion>0.1.0-preview.20260812</PackageVersion>
     <Authors>CodexRoslyn contributors</Authors>
     <Description>Local-first Roslyn MCP server for C#/.NET semantic navigation, diagnostics, impact analysis, and safe refactor previews.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -13,7 +13,7 @@
     <RepositoryUrl>https://github.com/Blato58/codex-roslyn.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>codex;mcp;roslyn;csharp;dotnet;semantic-navigation;refactoring</PackageTags>
-    <PackageReleaseNotes>Preview release with cold indexing, semantic navigation, diagnostics, impact analysis, refactor previews, opt-in apply, advanced analysis tools, and Codex plugin wiring.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fixes concurrent MCP process crashes while sharing the cold-index dirty marker, with guarded file-watcher invalidation.</PackageReleaseNotes>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>dotnet-roslyn-mcp</ToolCommandName>
   </PropertyGroup>

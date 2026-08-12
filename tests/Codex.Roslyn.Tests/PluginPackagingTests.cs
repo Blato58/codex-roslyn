@@ -72,7 +72,7 @@ public sealed class PluginPackagingTests
     {
         using var document = JsonDocument.Parse(File.ReadAllText(RepoPath("plugin", ".mcp.json")));
         var roslynServer = document.RootElement
-            .GetProperty("mcp_servers")
+            .GetProperty("mcpServers")
             .GetProperty("roslyn");
         var args = roslynServer
             .GetProperty("args")
@@ -103,7 +103,7 @@ public sealed class PluginPackagingTests
     {
         using var document = JsonDocument.Parse(File.ReadAllText(RepoPath("plugin", ".mcp.json")));
         var roslynServer = document.RootElement
-            .GetProperty("mcp_servers")
+            .GetProperty("mcpServers")
             .GetProperty("roslyn");
         var enabledTools = roslynServer
             .GetProperty("enabled_tools")
